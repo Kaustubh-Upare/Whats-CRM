@@ -1,0 +1,57 @@
+# ============================================================================
+# WhatsyITC — root .gitignore
+# Catches files that live at the repo root (docs, exports, scratch files).
+# Each subproject (frontend/, backend/) has its own .gitignore too.
+# ============================================================================
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+.claude/
+
+# Local scratch / temp
+*.tmp
+*.bak
+*.orig
+*.rej
+*.patch
+scratch/
+scratch.*
+TODO.local.md
+
+# Misc
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# Env files at the root (use .env.example for templates)
+.env
+.env.*
+!.env.example
+
+# Coverage / test artifacts
+coverage/
+.nyc_output/
+*.lcov
+
+# Build outputs that might land at the root by accident
+/dist/
+/build/
+/out/
+
+commercial_proposal_billing_crm_final_2week.pdf
+DEMO_SCRIPT.md
+META_SETUP.md
+README.md
+.claude

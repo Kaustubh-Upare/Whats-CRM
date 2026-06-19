@@ -1,0 +1,81 @@
+# ============================================================================
+# Backend — Go
+# ============================================================================
+
+# --- Build artifacts ---
+# Compiled Go binaries (any name)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Common binary names used in this project
+/server
+/server.exe
+/whatsyitc
+/whatsyitc-api
+/seed
+/seed.exe
+
+# Test binaries
+*.test
+*.out
+
+# Coverage profile
+coverage.out
+coverage.html
+
+# --- Vendoring (we use go modules — commit go.sum, ignore vendor dir) ---
+vendor/
+
+# --- Environment / secrets ---
+# Real env files; keep the example for reference
+.env
+.env.*
+!.env.example
+*.env.local
+secrets.json
+
+# --- Uploads ---
+# Runtime user uploads (Excel batches etc.) — keep folder, ignore contents
+uploads/*
+!uploads/.gitkeep
+
+# --- Logs ---
+*.log
+*.pid
+*.pid.lock
+
+# --- Local DB dumps ---
+*.sql.gz
+*.dump
+*.bak
+pgdata/
+
+# --- Go workspace files ---
+go.work
+go.work.sum
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# --- Profiling / debug ---
+*.pprof
+*.prof
+heap.dump
+
+# --- Air (live-reload) ---
+tmp/
+.air/
