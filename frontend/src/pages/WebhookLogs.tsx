@@ -22,6 +22,8 @@ const kindStyle: Record<string, { bg: string; fg: string; label: string; icon: a
   message: { bg: 'bg-emerald-50 border-emerald-200', fg: 'text-emerald-700', label: 'inbound', icon: MessageSquare },
   status:  { bg: 'bg-sky-50 border-sky-200',         fg: 'text-sky-700',     label: 'status',  icon: CheckCircle2 },
   mixed:   { bg: 'bg-violet-50 border-violet-200',   fg: 'text-violet-700',  label: 'mixed',   icon: Activity },
+  verify:  { bg: 'bg-lime-50 border-lime-200',       fg: 'text-lime-700',    label: 'verify',  icon: CheckCircle2 },
+  verify_failed: { bg: 'bg-amber-50 border-amber-200', fg: 'text-amber-700',  label: 'verify failed', icon: AlertTriangle },
   error:   { bg: 'bg-rose-50 border-rose-200',       fg: 'text-rose-700',    label: 'error',   icon: AlertTriangle },
   unknown: { bg: 'bg-slate-50 border-slate-200',     fg: 'text-slate-600',   label: 'other',   icon: Inbox },
 }
@@ -176,6 +178,10 @@ function summarize(log: WebhookLog): string {
   if (!p || typeof p !== 'object') return '(empty payload)'
 
   try {
+    if (log.event_kind === 'verify' || log.event_kind === 'verify_failed') {
+      return `${log.event_kind === 'verify' ? 'verification ok' : 'verification failed'} on ${p.path || '/webhook/whatsapp'}`
+    }
+
     const entries = p?.entry || []
     if (!Array.isArray(entries) || entries.length === 0) return '(no entries)'
 

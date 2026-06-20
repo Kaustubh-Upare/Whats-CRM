@@ -19,12 +19,35 @@ func (s *Server) WebhookVerify(w http.ResponseWriter, r *http.Request) {
 	mode := r.URL.Query().Get("hub.mode")
 	token := r.URL.Query().Get("hub.verify_token")
 	challenge := r.URL.Query().Get("hub.challenge")
-	if mode == "subscribe" && token == os.Getenv("WHATS_VERIFY_TOKEN") {
+	ok := mode == "subscribe" && token == os.Getenv("WHATS_VERIFY_TOKEN")
+	s.logWebhookVerifyAttempt(r, ok, mode, challenge)
+	if ok {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(challenge))
 		return
 	}
 	http.Error(w, "forbidden", http.StatusForbidden)
+}
+
+func (s *Server) logWebhookVerifyAttempt(r *http.Request, ok bool, mode, challenge string) {
+	ip := r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		ip = xff
+	}
+	kind := "verify_failed"
+	if ok {
+		kind = "verify"
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"path":          r.URL.Path,
+		"mode":          mode,
+		"token_matches": ok,
+		"has_challenge": challenge != "",
+	})
+	if _, err := s.Store.InsertWebhookLog(r.Context(), ip, r.UserAgent(), kind, payload, 0, 0, nil); err != nil {
+		log.Printf("[webhook] verify log insert failed: %v", err)
+	}
+	log.Printf("[webhook] verify path=%s ok=%v mode=%q challenge=%v ip=%s", r.URL.Path, ok, mode, challenge != "", ip)
 }
 
 // MetaStatusPayload is the shape of a delivery-status webhook.
