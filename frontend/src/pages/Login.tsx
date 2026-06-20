@@ -6,8 +6,8 @@ import { api, setToken, getToken } from '@/lib/api'
 
 export default function Login() {
   const nav = useNavigate()
-  const [email, setEmail] = useState('admin@whatsyitc.local')
-  const [password, setPassword] = useState('admin123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -108,8 +108,8 @@ export default function Login() {
           {busy ? 'Signing in…' : 'Sign in'}
         </motion.button>
 
-        <p className="mt-4 text-xs text-slate-500 text-center">
-          Default seed: <span className="font-mono">admin@whatsyitc.local</span> / <span className="font-mono">admin123</span>
+        <p className="mt-4 text-xs text-slate-400 text-center">
+          Use the credentials provided by your administrator.
         </p>
       </motion.form>
     </div>

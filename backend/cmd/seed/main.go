@@ -1,8 +1,9 @@
 // cmd/seed bootstraps the first admin user and a default template.
 //
-//   go run ./cmd/seed --email admin@whatsyitc.local --password admin123 --name "Demo Admin"
+//   go run ./cmd/seed --email admin@your-domain.com --password 'YOUR_PASSWORD' --name "Your Admin"
 //
 // Idempotent: re-running with the same email updates the password hash.
+// Honours BC_BCRYPT_COST from env (defaults to 10).
 package main
 
 import (
@@ -10,10 +11,12 @@ import (
 	"flag"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"github.com/whatsyitc/backend/internal/auth"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -24,6 +27,13 @@ func main() {
 	name := flag.String("name", "Demo Admin", "display name")
 	role := flag.String("role", "admin", "role")
 	flag.Parse()
+
+	cost := bcrypt.DefaultCost
+	if v := os.Getenv("BC_BCRYPT_COST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= bcrypt.MinCost && n <= bcrypt.MaxCost {
+			cost = n
+		}
+	}
 
 	uri := os.Getenv("POSTGRES_URI")
 	if uri == "" {
@@ -36,7 +46,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	hash, err := auth.HashPassword(*password)
+	hash, err := auth.HashPassword(*password, cost)
 	if err != nil {
 		log.Fatalf("hash: %v", err)
 	}

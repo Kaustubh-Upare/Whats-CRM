@@ -10,14 +10,14 @@ import (
 )
 
 type MessageJob struct {
-	MessageJobID   int64
-	BatchID        int64
+	MessageJobID    int64
+	BatchID         int64
 	BillingRecordID int64
-	ToNumber       string
-	TemplateName   string
-	LanguageCode   string
-	TemplateParams []string
-	Attempt        int
+	ToNumber        string
+	TemplateName    string
+	LanguageCode    string
+	TemplateParams  []string
+	Attempt         int
 }
 
 type JobQueue interface {
@@ -29,17 +29,25 @@ type JobQueue interface {
 
 type MemoryQueue struct {
 	ch       chan MessageJob
+	workers  int
 	wg       sync.WaitGroup
 	stopOnce sync.Once
 	stopped  chan struct{}
 }
 
-func NewMemory(buffer int) *MemoryQueue {
+// NewMemory builds an in-memory FIFO queue with `buffer` slots and `workers`
+// concurrent goroutines draining it. Both must be > 0; sane defaults are
+// applied otherwise.
+func NewMemory(buffer, workers int) *MemoryQueue {
 	if buffer <= 0 {
 		buffer = 1024
 	}
+	if workers <= 0 {
+		workers = 4
+	}
 	return &MemoryQueue{
 		ch:      make(chan MessageJob, buffer),
+		workers: workers,
 		stopped: make(chan struct{}),
 	}
 }
@@ -50,8 +58,7 @@ func (q *MemoryQueue) Enqueue(_ context.Context, job MessageJob) error {
 }
 
 func (q *MemoryQueue) Run(ctx context.Context, handler func(context.Context, MessageJob)) {
-	const workers = 4
-	for i := 0; i < workers; i++ {
+	for i := 0; i < q.workers; i++ {
 		q.wg.Add(1)
 		go func(id int) {
 			defer q.wg.Done()

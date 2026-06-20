@@ -9,7 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/whatsyitc/backend/internal/auth"
 	"github.com/whatsyitc/backend/internal/config"
 	"github.com/whatsyitc/backend/internal/db"
@@ -26,60 +27,72 @@ import (
 	"github.com/whatsyitc/backend/internal/store"
 	"github.com/whatsyitc/backend/internal/whatsapp"
 	"github.com/whatsyitc/backend/internal/worker"
-	"github.com/joho/godotenv"
 )
 
 func main() {
 	_ = godotenv.Load()
 	cfg := config.Load()
+
+	logger := newLogger(cfg)
+	slog.SetDefault(logger)
+	logger.Info("starting",
+		"env", cfg.Env,
+		"port", cfg.Port,
+		"frontend", cfg.AllowedOrigins(),
+		"worker_concurrency", cfg.WorkerConcurrency,
+	)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	pool, err := db.New(ctx, cfg.PostgresURI)
 	if err != nil {
-		log.Fatalf("postgres: %v", err)
+		logger.Error("postgres connect", "err", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
-	log.Printf("[server] postgres connected")
+	logger.Info("postgres connected")
 
 	migDir := os.Getenv("BC_MIGRATIONS_DIR")
 	if migDir == "" {
 		migDir = filepath.Join("internal", "db", "migrations")
 	}
 	if err := db.RunMigrations(ctx, pool, migDir); err != nil {
-		log.Fatalf("migrations: %v", err)
+		logger.Error("migrations", "err", err)
+		os.Exit(1)
 	}
+	logger.Info("migrations ok")
+
 	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
-		log.Fatalf("upload dir: %v", err)
+		logger.Error("upload dir", "err", err)
+		os.Exit(1)
 	}
 
 	st := store.New(pool)
 	wa := whatsapp.NewClient(cfg.WhatsAPIVersion, cfg.WhatsPhoneID, cfg.WhatsAccessToken)
-	q := queue.NewMemory(1024)
+	q := queue.NewMemory(1024, cfg.WorkerConcurrency)
 	wk := worker.New(st, wa, cfg.WhatsForceText)
 	q.Run(ctx, wk.Handle)
 	defer q.Stop()
+	logger.Info("queue + worker started")
 
 	srv := handlers.NewServer(cfg, st, wa, q)
-	issuer := auth.NewIssuer(cfg.JWTSecret)
+	issuer := auth.NewIssuer(cfg.JWTSecret, cfg.JWTAudience)
 
 	mux := http.NewServeMux()
 
 	// health + auth
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := pool.Ping(r.Context()); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "whatsyitc-billingcomm"})
-	})
-	mux.HandleFunc("POST /auth/login", srv.Login)
+	mux.HandleFunc("GET /healthz", srv.Healthz)
+	mux.Handle("POST /auth/login",
+		middleware.RateLimit(cfg.LoginRPS, cfg.LoginBurst, middleware.ClientIP)(
+			middleware.MaxBytes(cfg.MaxJSONBytes)(http.HandlerFunc(srv.Login))))
 	mux.Handle("GET /auth/me", middleware.JWTAuth(issuer)(http.HandlerFunc(srv.Me)))
 	mux.HandleFunc("POST /auth/logout", srv.Logout)
 
-	// public webhook
+	// public webhook (Meta). Body cap mirrors the same JSON ceiling.
 	mux.HandleFunc("GET /webhook/whatsapp", srv.WebhookVerify)
-	mux.HandleFunc("POST /webhook/whatsapp", srv.WebhookStatus)
+	mux.Handle("POST /webhook/whatsapp",
+		middleware.MaxBytes(cfg.MaxJSONBytes)(http.HandlerFunc(srv.WebhookStatus)))
 
 	// protected API
 	api := http.NewServeMux()
@@ -123,12 +136,22 @@ func main() {
 
 	api.HandleFunc("GET /webhook-logs", srv.ListWebhookLogs)
 
-	// Dev helpers (auth-protected, so only admins can fire them)
-	api.HandleFunc("POST /dev/simulate-inbound", srv.SimulateInbound)
+	// Dev helpers are only mounted in non-production environments. In prod
+	// they are not reachable (the mux entry doesn't exist) so an attacker
+	// can't hit them even with a valid JWT.
+	if !cfg.IsProduction() {
+		api.HandleFunc("POST /dev/simulate-inbound", srv.SimulateInbound)
+		logger.Warn("dev-only routes mounted (ENV != production)")
+	}
 
-	mux.Handle("/api/", http.StripPrefix("/api", middleware.JWTAuth(issuer)(api)))
+	// /api/* requires auth + a JSON body cap. Body cap is a no-op for GETs
+	// (no body to read), and rejects oversize POSTs before they hit handlers.
+	mux.Handle("/api/",
+		middleware.MaxBytes(cfg.MaxJSONBytes)(
+			middleware.JWTAuth(issuer)(http.StripPrefix("/api", api))))
 
-	handler := middleware.CORS(cfg.FrontendURL, mux)
+	// Outermost: RequestID for tracing, then CORS, then mux.
+	handler := middleware.RequestID(middleware.CORS(cfg.AllowedOrigins(), mux))
 
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.Port,
@@ -139,19 +162,42 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 	go func() {
-		log.Printf("[server] listening on :%s (env=%s, frontend=%s)", cfg.Port, cfg.Env, cfg.FrontendURL)
+		logger.Info("listening", "addr", ":"+cfg.Port)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %v", err)
+			logger.Error("listen", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
-	log.Printf("[server] shutting down")
+	logger.Info("shutdown signal received — draining")
+
+	// 1. Stop accepting new HTTP requests.
 	sc, c2 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer c2()
-	_ = httpSrv.Shutdown(sc)
+	if err := httpSrv.Shutdown(sc); err != nil {
+		logger.Error("http shutdown", "err", err)
+	}
+
+	// 2. Stop the worker pool (drains in-flight jobs, blocks new enqueues).
+	q.Stop()
+	logger.Info("worker drained, bye")
+}
+
+// newLogger returns a slog.Logger configured for the runtime environment.
+// Production gets JSON for log shippers (Loki/CloudWatch/Datadog); dev gets
+// the human-readable text format.
+func newLogger(cfg *config.Config) *slog.Logger {
+	level := slog.LevelInfo
+	if !cfg.IsProduction() {
+		level = slog.LevelDebug
+	}
+	if cfg.IsProduction() {
+		return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	}
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

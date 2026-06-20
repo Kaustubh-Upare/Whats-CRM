@@ -38,6 +38,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if u == nil {
+		// Don't leak whether the email exists — same error as wrong password.
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -49,18 +50,26 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	issuer := auth.NewIssuer(s.Cfg.JWTSecret)
+	issuer := auth.NewIssuer(s.Cfg.JWTSecret, s.Cfg.JWTAudience)
 	tok, err := issuer.Issue(u.ID, u.Email, u.Role, u.Name)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "token error")
 		return
+	}
+	// Secure cookie in production (HTTPS); Lax in dev so the cookie still
+	// travels back over http://localhost.
+	secure := s.Cfg.IsProduction()
+	sameSite := http.SameSiteLaxMode
+	if secure {
+		sameSite = http.SameSiteStrictMode
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "bc_token",
 		Value:    tok,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		SameSite: sameSite,
 		MaxAge:   int(auth.TokenTTL.Seconds()),
 	})
 	_ = s.Store.TouchAdminLogin(ctx, u.ID)
@@ -89,7 +98,12 @@ func (s *Server) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: "bc_token", Value: "", Path: "/", MaxAge: -1})
+	secure := s.Cfg.IsProduction()
+	http.SetCookie(w, &http.Cookie{
+		Name: "bc_token", Value: "", Path: "/",
+		Secure: secure, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		MaxAge: -1,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

@@ -19,8 +19,13 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func HashPassword(plain string) (string, error) {
-	b, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+// HashPassword hashes `plain` with bcrypt at `cost`. Cost must be in [4, 31];
+// callers should validate via config.Load before passing it in.
+func HashPassword(plain string, cost int) (string, error) {
+	if cost < bcrypt.MinCost {
+		cost = bcrypt.DefaultCost
+	}
+	b, err := bcrypt.GenerateFromPassword([]byte(plain), cost)
 	if err != nil {
 		return "", err
 	}
@@ -32,10 +37,13 @@ func CheckPassword(hash, plain string) error {
 }
 
 type Issuer struct {
-	Secret []byte
+	Secret   []byte
+	Audience string // optional "aud" claim — empty disables the assertion
 }
 
-func NewIssuer(secret string) *Issuer { return &Issuer{Secret: []byte(secret)} }
+func NewIssuer(secret, audience string) *Issuer {
+	return &Issuer{Secret: []byte(secret), Audience: audience}
+}
 
 func (i *Issuer) Issue(uid int64, email, role, name string) (string, error) {
 	claims := Claims{
@@ -44,6 +52,8 @@ func (i *Issuer) Issue(uid int64, email, role, name string) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(TokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			Issuer:    "whatsyitc-billingcomm",
+			Subject:   email,
+			Audience:  nilToAudience(i.Audience),
 		},
 	}
 	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -56,7 +66,7 @@ func (i *Issuer) Parse(s string) (*Claims, error) {
 			return nil, errors.New("bad signing method")
 		}
 		return i.Secret, nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil || !t.Valid {
 		if err == nil {
 			err = errors.New("token invalid")
@@ -67,6 +77,11 @@ func (i *Issuer) Parse(s string) (*Claims, error) {
 	if !ok {
 		return nil, errors.New("invalid claims")
 	}
+	if i.Audience != "" {
+		if !audienceContains(c.Audience, i.Audience) {
+			return nil, errors.New("invalid audience")
+		}
+	}
 	return c, nil
 }
 
@@ -75,4 +90,20 @@ func ExtractBearer(authHeader string) string {
 		return ""
 	}
 	return strings.TrimPrefix(authHeader, "Bearer ")
+}
+
+func nilToAudience(a string) jwt.ClaimStrings {
+	if a == "" {
+		return nil
+	}
+	return jwt.ClaimStrings{a}
+}
+
+func audienceContains(got jwt.ClaimStrings, want string) bool {
+	for _, a := range got {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }

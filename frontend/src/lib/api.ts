@@ -1,12 +1,20 @@
 import axios from 'axios'
 
+// In production, VITE_API_BASE points at the public backend URL
+// (e.g. https://api.your-domain.com). In dev it's left empty so the request
+// goes to "/" and Vite's dev proxy (vite.config.ts) forwards it to the
+// local Go server on :8082.
+const baseURL = import.meta.env.VITE_API_BASE || '/'
+
 export const api = axios.create({
-  baseURL: '/', // proxied by Vite to http://localhost:8082
+  baseURL,
   withCredentials: true, // send the bc_token cookie
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Token helper (Authorization header takes priority over cookie)
+// Token helper (Authorization header takes priority over cookie).
+// In production behind HTTPS the cookie is Secure+HttpOnly and localStorage
+// is left unused; we still keep the Bearer path so SSR / curl clients work.
 let _token: string | null = null
 export function setToken(t: string | null) {
   _token = t
