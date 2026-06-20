@@ -1010,33 +1010,41 @@ func (s *Store) ListConversations(ctx context.Context, search string, limit, off
 	for i := range out {
 		c := &out[i]
 		var (
-			j   *models.MessageJob
-			err error
+			j       *models.MessageJob
+			inbound *inboundPreview
+			err     error
 		)
 		if c.RetailerID != nil {
 			j, err = s.latestJobForRetailer(ctx, *c.RetailerID)
+			inbound, _ = s.latestInboundForRetailer(ctx, *c.RetailerID)
 		} else {
 			j, err = s.latestJobForPhone(ctx, c.Phone)
+			inbound, _ = s.latestInboundForPhone(ctx, c.Phone)
 		}
-		if err != nil || j == nil {
+		if err != nil {
 			continue
 		}
 
-		// If the most recent job is an orphan (status='received'), the actual
-		// user-visible preview is the latest inbound message body, not the
-		// empty template_name on the job row.
-		if j.Status == "received" {
+		if j != nil {
+			c.LastStatus = j.Status
+			c.LastDirection = "outbound"
+			c.LastPreview = previewFromParams(j)
+			c.LastMessageAt = jobMessageTime(j)
+		}
+
+		// Linked replies are stored in bc_message_status_events, not as a new
+		// job row. If a retailer replied after our latest outbound, make the
+		// conversation row show that inbound message and move it to the top.
+		if inbound != nil && (j == nil || !inbound.OccurredAt.Before(c.LastMessageAt)) {
+			c.LastMessageAt = inbound.OccurredAt
 			c.LastStatus = "received"
 			c.LastDirection = "inbound"
-			body, _ := s.latestInboundBody(ctx, j.ID)
-			c.LastPreview = body
-			continue
+			c.LastPreview = trimPreview(inbound.Body)
 		}
-
-		c.LastStatus = j.Status
-		c.LastDirection = "outbound"
-		c.LastPreview = previewFromParams(j)
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].LastMessageAt.After(out[j].LastMessageAt)
+	})
 	return out, total, nil
 }
 
@@ -1057,6 +1065,81 @@ func (s *Store) latestInboundBody(ctx context.Context, jobID int64) (string, err
 		text = text[:77] + "…"
 	}
 	return text, nil
+}
+
+type inboundPreview struct {
+	Body       string
+	OccurredAt time.Time
+}
+
+func (s *Store) latestInboundForRetailer(ctx context.Context, retailerID int64) (*inboundPreview, error) {
+	var p inboundPreview
+	err := s.DB.QueryRow(ctx, `
+		SELECT COALESCE(e.reason_text, '') AS body, e.occurred_at
+		FROM bc_message_status_events e
+		JOIN bc_message_jobs j ON j.id = e.message_job_id
+		WHERE j.retailer_id = $1 AND e.status = 'received'
+		ORDER BY e.occurred_at DESC
+		LIMIT 1
+	`, retailerID).Scan(&p.Body, &p.OccurredAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (s *Store) latestInboundForPhone(ctx context.Context, phone string) (*inboundPreview, error) {
+	var p inboundPreview
+	err := s.DB.QueryRow(ctx, `
+		SELECT COALESCE(e.reason_text, '') AS body, e.occurred_at
+		FROM bc_message_status_events e
+		JOIN bc_message_jobs j ON j.id = e.message_job_id
+		WHERE j.retailer_id IS NULL AND j.to_number = $1 AND e.status = 'received'
+		ORDER BY e.occurred_at DESC
+		LIMIT 1
+	`, phone).Scan(&p.Body, &p.OccurredAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func trimPreview(text string) string {
+	if len(text) > 80 {
+		text = text[:77] + "..."
+	}
+	return text
+}
+
+func onlyDigits(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func jobMessageTime(j *models.MessageJob) time.Time {
+	switch {
+	case j.SentAt != nil:
+		return *j.SentAt
+	case j.DeliveredAt != nil:
+		return *j.DeliveredAt
+	case j.ReadAt != nil:
+		return *j.ReadAt
+	case j.FailedAt != nil:
+		return *j.FailedAt
+	default:
+		return j.QueuedAt
+	}
 }
 
 func (s *Store) latestJobForRetailer(ctx context.Context, retailerID int64) (*models.MessageJob, error) {
@@ -1187,12 +1270,12 @@ func (s *Store) ListConversationMessages(ctx context.Context, retailerID int64, 
 
 	for inRows.Next() {
 		var (
-			id        int64
-			msgJobID  int64
-			body      string
-			status    string
-			occurred  time.Time
-			provID    *string
+			id       int64
+			msgJobID int64
+			body     string
+			status   string
+			occurred time.Time
+			provID   *string
 		)
 		if err := inRows.Scan(&id, &msgJobID, &body, &status, &occurred, &provID); err != nil {
 			return nil, err
@@ -1274,11 +1357,11 @@ func substituteDefaults(body string, invoice *string, amount *float64, occurredA
 // exactly what was sent to Meta (and what the retailer sees on their phone).
 //
 // Inputs (in priority order):
-//   1. templateBody (from bc_templates) + tplParams (from bc_message_jobs.template_params)
-//      -> substituted like Meta's renderer does. Newlines preserved.
-//   2. templateBody exists but params missing: substituteDefaults
-//   3. params only: composeFromParams (matches worker's plain-text fallback)
-//   4. last resort: dump invoice/amount if available.
+//  1. templateBody (from bc_templates) + tplParams (from bc_message_jobs.template_params)
+//     -> substituted like Meta's renderer does. Newlines preserved.
+//  2. templateBody exists but params missing: substituteDefaults
+//  3. params only: composeFromParams (matches worker's plain-text fallback)
+//  4. last resort: dump invoice/amount if available.
 func renderOutboundBody(templateBody *string, tplParams []byte, invoice *string, amount *float64, occurredAt time.Time) string {
 	var params []string
 	if len(tplParams) > 0 {
@@ -1491,23 +1574,37 @@ func (s *Store) CreateOrphanInboundJob(ctx context.Context, phone, body, timesta
 		occurredAt = time.Unix(ts, 0)
 	}
 
-	// Resolve retailer: if the phone already exists, link to it; otherwise
-// create a placeholder retailer. We use INSERT ... ON CONFLICT DO NOTHING
-// (relying on the unique index on whatsapp_number) and then read back the
-// id by phone. retailer_code has its own unique constraint, so we generate
-// one with a UUID to avoid collisions across multiple orphan inserts.
+	// Resolve retailer: Meta sends digits-only phones, while uploads may have
+	// a leading +. Match by normalized digits first so inbound replies do not
+	// create duplicate "(unknown)" conversations.
 	var retailerID int64
-	_, err := s.DB.Exec(ctx, `
-		INSERT INTO bc_retailers (retailer_code, whatsapp_number, retailer_name, is_opted_out)
-		VALUES ('orphan-' || md5(random()::text), $1, '(unknown)', FALSE)
-		ON CONFLICT (whatsapp_number) DO NOTHING
-	`, phone)
-	if err != nil {
-		return 0, err
+	var err error
+	normalizedPhone := onlyDigits(phone)
+	if normalizedPhone != "" {
+		err = s.DB.QueryRow(ctx, `
+			SELECT id
+			FROM bc_retailers
+			WHERE regexp_replace(whatsapp_number, '[^0-9]', '', 'g') = $1
+			ORDER BY id
+			LIMIT 1
+		`, normalizedPhone).Scan(&retailerID)
+		if err != nil && err != pgx.ErrNoRows {
+			return 0, err
+		}
 	}
-	err = s.DB.QueryRow(ctx, `SELECT id FROM bc_retailers WHERE whatsapp_number=$1`, phone).Scan(&retailerID)
-	if err != nil {
-		return 0, err
+	if retailerID == 0 {
+		_, err = s.DB.Exec(ctx, `
+			INSERT INTO bc_retailers (retailer_code, whatsapp_number, retailer_name, is_opted_out)
+			VALUES ('orphan-' || md5(random()::text), $1, '(unknown)', FALSE)
+			ON CONFLICT (whatsapp_number) DO NOTHING
+		`, phone)
+		if err != nil {
+			return 0, err
+		}
+		err = s.DB.QueryRow(ctx, `SELECT id FROM bc_retailers WHERE whatsapp_number=$1`, phone).Scan(&retailerID)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	// bc_message_jobs.batch_id and bc_billing_records.batch_id are FKs to
@@ -1525,7 +1622,7 @@ func (s *Store) CreateOrphanInboundJob(ctx context.Context, phone, body, timesta
 			(id, file_name, file_path, file_size_bytes, mime_type,
 			 uploaded_by, total_rows, valid_rows, status, notes)
 		VALUES ($1, 'orphan-inbound', '', 0, 'system/x-orphan',
-			1, 0, 0, 'system', 'synthetic batch for inbound-only messages')
+			NULL, 0, 0, 'system', 'synthetic batch for inbound-only messages')
 		ON CONFLICT (id) DO NOTHING
 	`, orphanBatchID)
 	if err != nil {
@@ -1571,11 +1668,16 @@ func (s *Store) CreateOrphanInboundJob(ctx context.Context, phone, body, timesta
 // Only acts if the existing name is "(unknown)" so we don't overwrite a
 // name the admin has already set manually.
 func (s *Store) UpdateRetailerNameByPhone(ctx context.Context, phone, name string) error {
+	normalizedPhone := onlyDigits(phone)
 	_, err := s.DB.Exec(ctx, `
 		UPDATE bc_retailers
 		SET retailer_name = $2
-		WHERE whatsapp_number = $1 AND retailer_name = '(unknown)'
-	`, phone, name)
+		WHERE retailer_name = '(unknown)'
+		  AND (
+		    whatsapp_number = $1
+		    OR ($3 <> '' AND regexp_replace(whatsapp_number, '[^0-9]', '', 'g') = $3)
+		  )
+	`, phone, name, normalizedPhone)
 	return err
 }
 

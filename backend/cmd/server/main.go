@@ -1,7 +1,7 @@
 // cmd/server is the main HTTP entrypoint for the WhatsyITC billing-comm
 // service. It exposes the API the admin frontend talks to.
 //
-//   go run ./cmd/server
+//	go run ./cmd/server
 //
 // Listens on PORT (default 8082).
 package main
@@ -92,6 +92,11 @@ func main() {
 	// public webhook (Meta). Body cap mirrors the same JSON ceiling.
 	mux.HandleFunc("GET /webhook/whatsapp", srv.WebhookVerify)
 	mux.Handle("POST /webhook/whatsapp",
+		middleware.MaxBytes(cfg.MaxJSONBytes)(http.HandlerFunc(srv.WebhookStatus)))
+	// Public alias for deployments whose reverse proxy already forwards /api/*.
+	// This exact route is registered before the protected /api/ subtree below.
+	mux.HandleFunc("GET /api/webhook/whatsapp", srv.WebhookVerify)
+	mux.Handle("POST /api/webhook/whatsapp",
 		middleware.MaxBytes(cfg.MaxJSONBytes)(http.HandlerFunc(srv.WebhookStatus)))
 
 	// protected API

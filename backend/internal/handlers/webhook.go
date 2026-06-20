@@ -29,11 +29,12 @@ func (s *Server) WebhookVerify(w http.ResponseWriter, r *http.Request) {
 
 // MetaStatusPayload is the shape of a delivery-status webhook.
 // Sample:
-// {
-//   "object":"whatsapp_business_account",
-//   "entry":[{"changes":[{"value":{"statuses":[
-//     {"id":"wamid.HBgL...","status":"delivered","timestamp":"1718700000","recipient_id":"91..."}]}}]}]
-// }
+//
+//	{
+//	  "object":"whatsapp_business_account",
+//	  "entry":[{"changes":[{"value":{"statuses":[
+//	    {"id":"wamid.HBgL...","status":"delivered","timestamp":"1718700000","recipient_id":"91..."}]}}]}]
+//	}
 type MetaStatusPayload struct {
 	Object string `json:"object"`
 	Entry  []struct {
@@ -56,12 +57,16 @@ type MetaStatusPayload struct {
 					From      string `json:"from"`
 					Timestamp string `json:"timestamp"`
 					Type      string `json:"type"`
-					Text      struct {
+					Context   struct {
+						From string `json:"from"`
+						ID   string `json:"id"`
+					} `json:"context"`
+					Text struct {
 						Body string `json:"body"`
 					} `json:"text"`
 				} `json:"messages"`
-				// For inbound replies, Meta also tells us which wamid of ours
-				// was the parent message (the one they replied to).
+				// Kept as a fallback for old/sample payloads. Real Meta inbound
+				// reply context lives inside each messages[] item.
 				Context struct {
 					From string `json:"from"`
 					ID   string `json:"id"`
@@ -92,7 +97,9 @@ func (s *Server) WebhookStatus(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, &p); err != nil {
 		parseErrMsg = err.Error()
 		// Still log the raw payload so we can debug what Meta sent.
-		_, _ = s.Store.InsertWebhookLog(r.Context(), ip, ua, "error", body, 0, 0, &parseErrMsg)
+		if _, logErr := s.Store.InsertWebhookLog(r.Context(), ip, ua, "error", body, 0, 0, &parseErrMsg); logErr != nil {
+			log.Printf("[webhook] log insert failed after parse error: %v", logErr)
+		}
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
@@ -115,7 +122,10 @@ func (s *Server) WebhookStatus(w http.ResponseWriter, r *http.Request) {
 	case statusCount > 0:
 		kind = "status"
 	}
-	_, _ = s.Store.InsertWebhookLog(r.Context(), ip, ua, kind, body, msgCount, statusCount, nil)
+	log.Printf("[webhook] hit kind=%s messages=%d statuses=%d ip=%s bytes=%d", kind, msgCount, statusCount, ip, len(body))
+	if _, err := s.Store.InsertWebhookLog(r.Context(), ip, ua, kind, body, msgCount, statusCount, nil); err != nil {
+		log.Printf("[webhook] log insert failed: %v", err)
+	}
 
 	ctx := r.Context()
 	for _, e := range p.Entry {
@@ -149,12 +159,13 @@ func (s *Server) WebhookStatus(w http.ResponseWriter, r *http.Request) {
 			// 'messages' array alongside (or instead of) 'statuses'. Each text
 			// message is recorded via recordInbound (handles reply + orphan).
 			for _, msg := range c.Value.Messages {
-				if msg.Type != "text" || strings.TrimSpace(msg.Text.Body) == "" {
+				body := strings.TrimSpace(msg.Text.Body)
+				if msg.Type != "text" || body == "" {
 					continue
 				}
-				parentWamid := c.Value.Context.ID
+				parentWamid := msg.Context.ID
 				if parentWamid == "" {
-					parentWamid = msg.ID
+					parentWamid = c.Value.Context.ID
 				}
 				// Look up the contact's display name from the same payload
 				// (the contacts array is keyed by wa_id = sender phone).
@@ -165,8 +176,8 @@ func (s *Server) WebhookStatus(w http.ResponseWriter, r *http.Request) {
 						break
 					}
 				}
-				jobID, err := s.recordInbound(ctx, msg.From, msg.Text.Body, parentWamid, msg.Timestamp, "webhook", contactName)
-				log.Printf("[webhook] inbound: from=%s body=%q parent=%s -> jobID=%d err=%v", msg.From, msg.Text.Body, parentWamid, jobID, err)
+				jobID, err := s.recordInbound(ctx, msg.From, body, parentWamid, msg.Timestamp, "webhook", contactName)
+				log.Printf("[webhook] inbound: from=%s body=%q parent=%s inbound=%s -> jobID=%d err=%v", msg.From, body, parentWamid, msg.ID, jobID, err)
 			}
 		}
 	}
@@ -181,10 +192,10 @@ func (s *Server) WebhookStatus(w http.ResponseWriter, r *http.Request) {
 //     (empty string for an unsolicited first message).
 //   - timestamp:   unix-seconds string from Meta, or "" (we use time.Now()).
 //   - source:      "webhook" or "dev" — written into the audit log so we
-//                  can tell how the inbound arrived.
+//     can tell how the inbound arrived.
 //   - contactName: optional. If non-empty, used to upgrade the retailer
-//                  row's name (overwrites the "(unknown)" placeholder
-//                  that CreateOrphanInboundJob sets).
+//     row's name (overwrites the "(unknown)" placeholder
+//     that CreateOrphanInboundJob sets).
 //
 // Returns the resolved message_job_id (existing parent job, or new orphan job).
 func (s *Server) recordInbound(ctx context.Context, phone, body, parentWamid, timestamp, source, contactName string) (int64, error) {
@@ -245,7 +256,8 @@ func readAll(r *http.Request) ([]byte, error) {
 // without a real Meta round-trip (e.g. before ngrok is configured).
 //
 // POST /api/dev/simulate-inbound
-//   { "phone": "919168810152", "body": "Hello from retailer", "name": "OFFLINE" }
+//
+//	{ "phone": "919168810152", "body": "Hello from retailer", "name": "OFFLINE" }
 //
 // Shares the same recordInbound code path as the real webhook, so a single
 // fix here updates both.
