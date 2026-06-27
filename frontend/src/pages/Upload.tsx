@@ -1,19 +1,25 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import {
   UploadCloud, FileSpreadsheet, CheckCircle2, AlertTriangle,
   ArrowRight, ArrowUpRight, Download, RefreshCw, Sparkles,
+  Bot, ChevronDown, ChevronUp, ExternalLink, ShieldAlert,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { Card, CardHeader, ErrorBox, PageHeader, PrimaryButton, SecondaryButton, Spinner } from '@/components/ui'
 import { containerStagger, itemFadeUp, CountUp } from '@/lib/motion'
 import { fmtMoney } from '@/lib/format'
 import PhonePreview from '@/components/PhonePreview'
-import type { BillingRecord, UploadBatch } from '@/lib/types'
+import { getAIAgentConfig, aiKeys } from '@/lib/ai'
+import { getBatchAIFollowup, putBatchAIFollowup, batchAIKeys } from '@/lib/batchAI'
+import {
+  AIFollowupStatusBadge, AIFollowupStatusCounts, AIFollowupLastMessage,
+} from '@/components/AIFollowupParts'
+import type { BatchAIFollowup, BatchAIRecipient, BillingRecord, UploadBatch } from '@/lib/types'
 
 type UploadResp = {
   batch: UploadBatch
@@ -28,6 +34,31 @@ export default function Upload() {
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<UploadResp | null>(null)
   const [previewRow, setPreviewRow] = useState<number | null>(null)
+  // We need to refresh the result view's local "enabled" state from
+  // the server if a GET comes back with a different value (e.g.
+  // another tab toggled it, or the server rejected a PUT). The
+  // uploaded `result.batch` only carries the value at upload-time;
+  // subsequent refreshes come through queryClient.invalidate.
+
+  // Merge the latest server-confirmed batch status /
+  // ai_followup_enabled back into the upload result, so the header
+  // chip and the toggle's parent context don't drift after the user
+  // navigates to the batch detail page and back. Without this, the
+  // header still says "validated" even after a successful Approve
+  // on /admin/batches/:id.
+  function applyFollowupSnapshot(f: BatchAIFollowup) {
+    setResult((prev) => prev && prev.batch.id === f.batch_id
+      ? {
+          ...prev,
+          batch: {
+            ...prev.batch,
+            status: f.batch_status as UploadBatch['status'],
+            ai_followup_enabled: f.enabled,
+            ai_followup_enabled_at: f.enabled_at ?? prev.batch.ai_followup_enabled_at,
+          },
+        }
+      : prev)
+  }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'text/csv': ['.csv'] },
@@ -93,8 +124,10 @@ export default function Upload() {
               <motion.div
                 animate={{ scale: isDragActive ? 1.01 : 1 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                className={`bg-white border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-colors ${
-                  isDragActive ? 'border-brand-500 bg-brand-50' : 'border-slate-300 hover:border-brand-400'
+                className={`bg-white dark:bg-[var(--bg-elevated)] border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-colors ${
+                  isDragActive
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10 dark:border-emerald-400/60'
+                    : 'border-slate-300 dark:border-slate-700 hover:border-emerald-400 dark:hover:border-emerald-400/60'
                 }`}
               >
                 <div {...getRootProps()} className="cursor-pointer">
@@ -106,10 +139,10 @@ export default function Upload() {
                 >
                   <UploadCloud className="w-12 h-12 mx-auto text-brand-500" />
                 </motion.div>
-                <div className="mt-4 text-slate-900 font-medium">
+                <div className="mt-4 text-slate-900 dark:text-white font-medium">
                   {isDragActive ? 'Drop the file here…' : 'Drag & drop, or click to browse'}
                 </div>
-                <div className="text-xs text-slate-500 mt-1.5">.xlsx or .csv · up to 25 MB</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">.xlsx or .csv · up to 25 MB</div>
                 <AnimatePresence>
                   {file && (
                     <motion.div
@@ -117,12 +150,12 @@ export default function Upload() {
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.9 }}
                       transition={{ type: 'spring', stiffness: 380, damping: 24 }}
-                      className="mt-5 inline-flex items-center gap-2 text-sm text-slate-700 bg-slate-100 px-3.5 py-2 rounded-lg"
+                      className="mt-5 inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-white/5 px-3.5 py-2 rounded-lg"
                     >
                       <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                       <span className="font-medium">{file.name}</span>
-                      <span className="text-slate-500">·</span>
-                      <span className="text-slate-500">{(file.size / 1024).toFixed(1)} KB</span>
+                      <span className="text-slate-500 dark:text-slate-400">·</span>
+                      <span className="text-slate-500 dark:text-slate-400">{(file.size / 1024).toFixed(1)} KB</span>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -141,11 +174,11 @@ export default function Upload() {
                   )}
                 </PrimaryButton>
                 <a href="/sample-billing-template.xlsx" download
-                   className="px-4 py-2 text-sm border border-slate-300 rounded-md hover:bg-slate-50 text-slate-700">
+                   className="px-4 py-2 text-sm border border-slate-300 dark:border-slate-700 rounded-md hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-200">
                   Download sample template
                 </a>
                 {file && (
-                  <button onClick={reset} className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900">
+                  <button onClick={reset} className="px-3 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
                     Clear
                   </button>
                 )}
@@ -155,7 +188,7 @@ export default function Upload() {
 
             <Card className="self-start">
               <CardHeader title="Required columns" subtitle="Case-insensitive" />
-              <div className="p-5 text-sm text-slate-700 space-y-1.5">
+              <div className="p-5 text-sm text-slate-700 dark:text-slate-300 space-y-1.5">
                 {['retailer_code', 'retailer_name', 'whatsapp_number', 'invoice_number', 'billing_amount', 'due_date'].map((c) => (
                   <motion.div
                     key={c}
@@ -164,11 +197,11 @@ export default function Upload() {
                     transition={{ delay: 0.04 }}
                     className="flex items-center gap-2"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[12px]">{c}</code>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <code className="bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 rounded text-[12px] text-slate-800 dark:text-slate-200">{c}</code>
                   </motion.div>
                 ))}
-                <div className="mt-3 text-xs text-slate-500">
+                <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
                   Optional: <code>payment_link</code>, <code>language</code> (en/hi/mr).
                 </div>
               </div>
@@ -188,17 +221,17 @@ export default function Upload() {
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25 }}
-              className="flex items-center justify-between gap-3 flex-wrap bg-white border border-slate-200 rounded-2xl px-5 py-4 shadow-sm"
+              className="flex items-center justify-between gap-3 flex-wrap admin-card rounded-2xl px-5 py-4"
             >
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 grid place-items-center shrink-0">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-500/15 grid place-items-center shrink-0">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div className="min-w-0">
-                  <div className="font-semibold text-slate-900 truncate">
+                  <div className="font-semibold text-slate-900 dark:text-white truncate">
                     Batch #{result.batch.id} · {result.batch.file_name}
                   </div>
-                  <div className="text-xs text-slate-500 mt-0.5">
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Validated {new Date(result.batch.created_at).toLocaleString()} ·{' '}
                     <span className="capitalize">{result.batch.status}</span>
                   </div>
@@ -208,9 +241,27 @@ export default function Upload() {
                 <SecondaryButton onClick={reset}>
                   <RefreshCw className="w-4 h-4" /> Upload another
                 </SecondaryButton>
+                <AIFollowupToggle batch={result.batch} onBatchRefreshed={applyFollowupSnapshot} />
+                {result.batch.ai_followup_enabled && (
+                  <Link
+                    to={`/admin/batches/${result.batch.id}/ai-followup`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
+                               text-emerald-700 dark:text-emerald-300
+                               border border-emerald-200 dark:border-emerald-400/30
+                               hover:bg-emerald-50 dark:hover:bg-emerald-500/10
+                               transition-colors"
+                    title="Open the per-batch AI follow-up page — survives navigation, polls every 10s"
+                  >
+                    <Bot className="w-4 h-4" /> View AI panel →
+                  </Link>
+                )}
                 {result.batch.valid_rows > 0 && (
-                  <PrimaryButton onClick={() => nav(`/batches/${result.batch.id}`)}>
-                    Approve &amp; open <ArrowRight className="w-4 h-4" />
+                  <PrimaryButton onClick={() => nav(`/admin/batches/${result.batch.id}`)}>
+                    {['approved', 'sending', 'sent', 'completed'].includes(result.batch.status) ? (
+                      <>Open batch <ArrowRight className="w-4 h-4" /></>
+                    ) : (
+                      <>Approve &amp; open <ArrowRight className="w-4 h-4" /></>
+                    )}
                   </PrimaryButton>
                 )}
               </div>
@@ -234,17 +285,17 @@ export default function Upload() {
             {result.batch.valid_rows > 0 && (
               <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6">
                 {/* Phone */}
-                <Card hover={false} className="!p-0 overflow-hidden bg-gradient-to-b from-slate-50 to-white">
-                  <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <Card hover={false} className="!p-0 overflow-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900/40 dark:to-slate-950/30">
+                  <div className="px-5 py-4 border-b border-slate-100 dark:border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-brand-500" />
-                      <div className="font-semibold text-sm">Recipient preview</div>
+                      <Sparkles className="w-4 h-4 text-emerald-500" />
+                      <div className="font-semibold text-sm text-slate-900 dark:text-white">Recipient preview</div>
                     </div>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
                       What the retailer will see
                     </div>
                   </div>
-                  <div className="p-6 flex justify-center bg-gradient-to-b from-slate-50 to-slate-100/40">
+                  <div className="p-6 flex justify-center bg-gradient-to-b from-slate-50 to-slate-100/40 dark:from-slate-900/30 dark:to-slate-800/30">
                     <PhonePreview
                       batchId={result.batch.id}
                       initialRow={previewRow}
@@ -261,7 +312,7 @@ export default function Upload() {
                   />
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead className="bg-slate-50 text-slate-600">
+                      <thead className="bg-slate-50 dark:bg-white/5 text-slate-600 dark:text-slate-300">
                         <tr>
                           <Th>#</Th><Th>Retailer</Th><Th>WhatsApp</Th><Th>Invoice</Th><Th>Amount</Th><Th>Due</Th><Th></Th>
                         </tr>
@@ -276,12 +327,12 @@ export default function Upload() {
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ delay: i * 0.03, duration: 0.2 }}
                               onClick={() => setPreviewRow(r.row_number)}
-                              whileHover={{ backgroundColor: '#f8fafc' }}
-                              className={`border-t border-slate-100 cursor-pointer transition-colors ${
-                                active ? 'bg-brand-50/60' : ''
+                              whileHover={{ backgroundColor: 'rgba(148,163,184,0.08)' }}
+                              className={`border-t border-slate-100 dark:border-white/10 cursor-pointer transition-colors ${
+                                active ? 'bg-emerald-50/60 dark:bg-emerald-500/15' : ''
                               }`}
                             >
-                              <Td><span className="text-slate-400 font-mono text-xs">{r.row_number}</span></Td>
+                              <Td><span className="text-slate-400 dark:text-slate-500 font-mono text-xs">{r.row_number}</span></Td>
                               <Td>{r.retailer_name}</Td>
                               <Td className="font-mono text-xs">{r.whatsapp_number}</Td>
                               <Td className="font-mono text-xs">{r.invoice_number}</Td>
@@ -289,11 +340,11 @@ export default function Upload() {
                               <Td>{r.due_date}</Td>
                               <Td>
                                 {active ? (
-                                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700">
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
                                     Previewing <ArrowUpRight className="w-3 h-3" />
                                   </span>
                                 ) : (
-                                  <span className="text-[11px] text-slate-400">Tap to preview</span>
+                                  <span className="text-[11px] text-slate-400 dark:text-slate-500">Tap to preview</span>
                                 )}
                               </Td>
                             </motion.tr>
@@ -304,6 +355,13 @@ export default function Upload() {
                   </div>
                 </Card>
               </div>
+            )}
+
+            {/* AI agent activity — per-recipient AI follow-up state for
+                this batch. Hidden entirely when there are no valid
+                recipients (i.e. no one to track). */}
+            {result.batch.valid_rows > 0 && (
+              <AIAgentActivityPanel batchId={result.batch.id} />
             )}
 
             {/* Errors (collapsed if none) */}
@@ -320,7 +378,7 @@ export default function Upload() {
                 />
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-slate-600">
+                    <thead className="bg-slate-50 dark:bg-white/5 text-slate-600 dark:text-slate-300">
                       <tr>
                         <Th>Row</Th><Th>Code</Th><Th>Retailer</Th><Th>WhatsApp</Th><Th>Errors</Th>
                       </tr>
@@ -332,8 +390,8 @@ export default function Upload() {
                           initial={{ opacity: 0, y: 4 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: i * 0.03, duration: 0.2 }}
-                          whileHover={{ backgroundColor: '#fff1f2' }}
-                          className="border-t border-slate-100 align-top"
+                          whileHover={{ backgroundColor: 'rgba(244,63,94,0.10)' }}
+                          className="border-t border-slate-100 dark:border-white/10 align-top"
                         >
                           <Td>{e.row_number}</Td>
                           <Td className="font-mono text-xs">{e.retailer_code || '—'}</Td>
@@ -347,7 +405,7 @@ export default function Upload() {
                                   initial={{ opacity: 0, x: -4 }}
                                   animate={{ opacity: 1, x: 0 }}
                                   transition={{ delay: 0.1 + j * 0.04 }}
-                                  className="flex items-start gap-1.5 text-rose-700"
+                                  className="flex items-start gap-1.5 text-rose-700 dark:text-rose-300"
                                 >
                                   <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                                   <span><span className="font-medium">{v.field}</span> ({v.code}): {v.message}</span>
@@ -370,11 +428,15 @@ export default function Upload() {
 }
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: 'green' | 'red' | 'amber' }) {
-  const colors = { green: 'text-emerald-700', red: 'text-rose-700', amber: 'text-amber-700' } as const
+  const colors = {
+    green: 'text-emerald-700 dark:text-emerald-300',
+    red:   'text-rose-700   dark:text-rose-300',
+    amber: 'text-amber-700  dark:text-amber-300',
+  } as const
   return (
-    <div className="bg-white border border-slate-200 rounded-xl shadow-sm px-4 py-3">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className={`text-2xl font-semibold mt-0.5 ${tone ? colors[tone] : 'text-slate-800'}`}>
+    <div className="admin-card rounded-xl px-4 py-3">
+      <div className="text-xs text-slate-500 dark:text-slate-400">{label}</div>
+      <div className={`text-2xl font-semibold mt-0.5 ${tone ? colors[tone] : 'text-slate-800 dark:text-white'}`}>
         <CountUp value={value} format={(v) => Math.round(v).toLocaleString()} />
       </div>
     </div>
@@ -383,3 +445,303 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: 'gr
 
 function Th({ children }: { children?: React.ReactNode }) { return <th className="text-left px-3 py-2 font-medium">{children}</th> }
 function Td({ children, className = '' }: { children?: React.ReactNode; className?: string }) { return <td className={`px-3 py-2 ${className}`}>{children}</td> }
+
+/* ----------------------------------------------------------------------- */
+/* AI follow-up — per-batch toggle + activity panel                         */
+/* ----------------------------------------------------------------------- */
+
+// AIFollowupToggle is the inline switch in the result action bar.
+//
+// Behaviour:
+//   - Disabled when the batch hasn't been approved yet — the user
+//     explicitly chose "AI follow-up activates only after Approve &
+//     open", so we surface a tooltip explaining why. The batch statuses
+//     `approved | sending | sent | completed` are all "approved".
+//   - Independent of the global AIAgentConfig.enabled. If the global
+//     agent is disabled we show a small amber warning chip that links
+//     to /admin/ai/agent — non-blocking, since the admin may want to
+//     schedule the batch to turn on AI later.
+//   - On change, PUTs to /api/batches/:id/ai-followup, then invalidates
+//     the matching query so AIAgentActivityPanel re-fetches.
+function AIFollowupToggle({ batch, onBatchRefreshed }: { batch: UploadBatch; onBatchRefreshed?: (f: BatchAIFollowup) => void }) {
+  const qc = useQueryClient()
+  const [saving, setSaving] = useState(false)
+
+  // Source of truth: the same GET that powers the AI agent activity
+  // panel below. This makes the toggle reactive to changes that
+  // happen elsewhere (e.g. the user approves the batch on
+  // /admin/batches/:id and then comes back here — the refetch picks
+  // up the new status). Without this, the toggle was gated on the
+  // upload-time-frozen `batch.status` and stayed disabled forever.
+  const followupQ = useQuery({
+    queryKey: batchAIKeys.followup(batch.id),
+    queryFn: () => getBatchAIFollowup(batch.id),
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+    retry: false,
+  })
+
+  // Probe the global agent to surface a warning when the global
+  // switch is off. We don't fail-closed — the admin might be planning
+  // to enable both at the same time, so the chip is informational.
+  const agentQ = useQuery({
+    queryKey: aiKeys.agent(),
+    queryFn: getAIAgentConfig,
+    // Cached for 5 minutes; re-fetched on demand via qc.invalidateQueries.
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
+  const approvedStatuses = new Set(['approved', 'sending', 'sent', 'completed'])
+  const data = followupQ.data
+  // Derive everything from the query. The `followup` response carries
+  // `batch_status` (server-confirmed) and `enabled` (server-confirmed),
+  // so we no longer trust the upload-time snapshot. We fall back to
+  // the prop only while the first GET is in flight, so the toggle
+  // doesn't flash a wrong state on the very first render.
+  const batchApproved = data ? approvedStatuses.has(data.batch_status) : approvedStatuses.has(batch.status)
+  const enabled = data ? data.enabled : !!batch.ai_followup_enabled
+  const recipientsTotal = data?.recipients_total ?? null
+  const globalDisabled = agentQ.data ? agentQ.data.enabled === false : false
+
+  // Bubble the latest server state up so the parent keeps its
+  // header chip ("Validated X · approved") in sync.
+  useEffect(() => {
+    if (data && onBatchRefreshed) onBatchRefreshed(data)
+    // onBatchRefreshed identity may change on every render; we
+    // only want to fire when the snapshot itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
+
+  async function onChange(next: boolean) {
+    if (saving || !batchApproved) return
+    setSaving(true)
+    try {
+      // The PUT response IS the new truth. Don't optimistic-set a
+      // local boolean — let the invalidation + refetch below
+      // re-derive `enabled` from the server response, so a 422
+      // (no_valid_recipients) correctly leaves the toggle in its
+      // prior state instead of looking "on" with no rows.
+      await putBatchAIFollowup(batch.id, next)
+      await qc.invalidateQueries({ queryKey: batchAIKeys.followup(batch.id) })
+      // Re-fetch immediately so the toggle flips without waiting
+      // for the next polling tick of the activity panel.
+      await qc.refetchQueries({ queryKey: batchAIKeys.followup(batch.id) })
+      toast.success(next ? 'AI follow-up enabled for this batch' : 'AI follow-up disabled for this batch')
+    } catch (e: any) {
+      const status = e?.response?.status
+      const code = e?.response?.data?.error
+      if (status === 422 && code === 'no_valid_recipients') {
+        toast.error(
+          'AI follow-up was enabled, but this batch has no valid WhatsApp numbers to track. ' +
+          'Re-upload a file with at least one valid number.',
+          { duration: 7000 },
+        )
+      } else {
+        toast.error(
+          e?.response?.data?.message ||
+          e?.response?.data?.error ||
+          'Failed to update AI follow-up',
+        )
+      }
+      // Refetch so the toggle snaps back to the server's view of
+      // reality (the flag did flip to true but with 0 rows).
+      qc.refetchQueries({ queryKey: batchAIKeys.followup(batch.id) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const disabled = !batchApproved || saving
+
+  return (
+    <div className="inline-flex items-center gap-2 pl-1 pr-2 py-1 rounded-full border border-slate-200/80 dark:border-white/10
+                    bg-white/70 dark:bg-white/5">
+      <Bot className={`w-4 h-4 ${enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`} />
+      <div className="text-[12px] font-medium text-slate-700 dark:text-slate-200 select-none">
+        AI follow-up
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label="Toggle AI follow-up for this batch"
+        title={batchApproved ? undefined : 'Approve the batch first'}
+        disabled={disabled}
+        onClick={() => onChange(!enabled)}
+        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors
+                    ${enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}
+                    ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+      >
+        <span
+          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform
+                      ${enabled ? 'translate-x-5' : 'translate-x-1'}`}
+        />
+      </button>
+      {saving && <Spinner />}
+      {!batchApproved && (
+        <Link
+          to={`/admin/batches/${batch.id}`}
+          className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+          title="Approve the batch first — opens the batch detail page"
+        >
+          · approve first
+        </Link>
+      )}
+      {enabled && recipientsTotal === 0 && (
+        <span
+          className="text-[11px] text-amber-700 dark:text-amber-300"
+          title="AI follow-up is on but the server couldn't back-fill any recipients. This usually means the batch was uploaded before per-admin ownership was tracked, or the file has no valid WhatsApp numbers."
+        >
+          · 0 recipients
+        </span>
+      )}
+      {globalDisabled && batchApproved && (
+        <Link
+          to="/admin/ai/agent"
+          className="inline-flex items-center gap-1 text-[11px] font-medium
+                     text-amber-700 dark:text-amber-300 hover:underline"
+          title="The global AI agent is disabled. The per-batch toggle will be a no-op until you turn it on."
+        >
+          <ShieldAlert className="w-3 h-3" /> agent off
+        </Link>
+      )}
+    </div>
+  )
+}
+
+// AIAgentActivityPanel — the dedicated section under the preview grid
+// that lists every recipient in this batch and the AI agent's current
+// status for them. Polled every 10s while the panel is open.
+function AIAgentActivityPanel({ batchId }: { batchId: number }) {
+  const [open, setOpen] = useState(true)
+  const q = useQuery({
+    queryKey: batchAIKeys.followup(batchId),
+    queryFn: () => getBatchAIFollowup(batchId),
+    refetchInterval: open ? 10_000 : false,
+    refetchOnWindowFocus: true,
+    retry: false,
+  })
+
+  const data = q.data
+  const recipients: BatchAIRecipient[] = data?.recipients ?? []
+  const counts = data?.recipients_by_status ?? {}
+  const total = data?.recipients_total ?? recipients.length
+  const enabled = !!data?.enabled
+
+  return (
+    <Card hover={false}>
+      <CardHeader
+        title={
+          <div className="flex items-center gap-2">
+            <Bot className="w-4 h-4 text-emerald-500" />
+            <span>AI agent activity — this batch</span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">
+              ({total} recipient{total === 1 ? '' : 's'})
+            </span>
+          </div>
+        }
+        subtitle={enabled
+          ? 'Agent will auto-reply to inbound messages from recipients in this batch.'
+          : 'Turn on AI follow-up above to start tracking replies for these retailers.'}
+        right={
+          <div className="flex items-center gap-2">
+            {enabled && (
+              <StatusCounts counts={counts} />
+            )}
+            <button
+              type="button"
+              onClick={() => setOpen((o) => !o)}
+              className="inline-flex items-center gap-1 text-[12px] text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+              aria-expanded={open}
+            >
+              {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {open ? 'Collapse' : 'Expand'}
+            </button>
+          </div>
+        }
+      />
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="panel-body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="p-5 pt-0">
+              {q.isLoading && (
+                <div className="py-6"><Spinner /></div>
+              )}
+              {q.isError && (
+                <ErrorBox msg={(q.error as any)?.response?.data?.error || 'Failed to load AI activity'} />
+              )}
+              {q.isSuccess && !enabled && (
+                <div className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                  <Bot className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+                  AI follow-up is off for this batch. Toggle the switch in the action bar above to start tracking.
+                </div>
+              )}
+              {q.isSuccess && enabled && recipients.length === 0 && (
+                <div className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                  No recipients to track yet — this is normal for a freshly uploaded batch.
+                </div>
+              )}
+              {q.isSuccess && enabled && recipients.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 dark:bg-white/5 text-slate-600 dark:text-slate-300">
+                      <tr>
+                        <Th>Retailer</Th>
+                        <Th>WhatsApp</Th>
+                        <Th>Status</Th>
+                        <Th>Last message</Th>
+                        <Th></Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recipients.map((r, i) => (
+                        <motion.tr
+                          key={r.id}
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: i * 0.02, duration: 0.2 }}
+                          className="border-t border-slate-100 dark:border-white/10"
+                        >
+                          <Td>{r.retailer_name || '—'}</Td>
+                          <Td className="font-mono text-xs">{r.whatsapp_number}</Td>
+                          <Td><AIStatusBadge status={r.ai_status} /></Td>
+                          <Td><LastMessageCell r={r} /></Td>
+                          <Td>
+                            <Link
+                              to={`/admin/ai/conversations?phone=${encodeURIComponent(r.whatsapp_number)}`}
+                              className="inline-flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-300 hover:underline"
+                            >
+                              Open chat <ExternalLink className="w-3 h-3" />
+                            </Link>
+                          </Td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Card>
+  )
+}
+
+// StatusCounts, humanizeStatus, AIStatusBadge, and LastMessageCell
+// were lifted into components/AIFollowupParts.tsx so the per-batch
+// panel here and the cross-batch queue at /admin/ai/followups render
+// the exact same look. We re-export them under their old names at
+// the bottom of this file for any future local call site.
+const StatusCounts = AIFollowupStatusCounts
+const AIStatusBadge = AIFollowupStatusBadge
+const LastMessageCell = AIFollowupLastMessage

@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -14,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/whatsyitc/backend/internal/audit"
 	"github.com/whatsyitc/backend/internal/excel"
 	"github.com/whatsyitc/backend/internal/middleware"
@@ -21,9 +25,10 @@ import (
 )
 
 func (s *Server) ListBatches(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	limit := intParam(r, "limit", 50)
 	offset := intParam(r, "offset", 0)
-	items, total, err := s.Store.ListBatches(r.Context(), limit, offset)
+	items, total, err := s.Store.ListBatches(r.Context(), uid, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -34,12 +39,13 @@ func (s *Server) ListBatches(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetBatch(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	b, err := s.Store.GetBatch(r.Context(), id)
+	b, err := s.Store.GetBatch(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -49,17 +55,17 @@ func (s *Server) GetBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Build a validation report
-	recs, err := s.Store.ListBillingRecords(r.Context(), id, true)
+	recs, err := s.Store.ListBillingRecords(r.Context(), uid, id, true)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	invalid, err := s.Store.ListInvalidBillingRecords(r.Context(), id)
+	invalid, err := s.Store.ListInvalidBillingRecords(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jobs, err := s.Store.ListJobsByBatch(r.Context(), id)
+	jobs, err := s.Store.ListJobsByBatch(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -130,7 +136,7 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 		MimeType:      mt,
 		UploadedBy:    &uid,
 	}
-	id, err := s.Store.CreateBatch(r.Context(), batch)
+	id, err := s.Store.CreateBatch(r.Context(), uid, batch)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "create batch: "+err.Error())
 		return
@@ -162,6 +168,8 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 		m := sheet.ToMap(row)
 		rec, _ := excel.ParseRow(i+1, m)
 		rec.BatchID = id
+		owner := uid
+		rec.AdminUserID = &owner
 		// upsert retailer (only for rows that have retailer_code)
 		if rec.RetailerCode != nil {
 			if firstRow, ok := seen[*rec.RetailerCode]; ok {
@@ -175,10 +183,10 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 			} else {
 				seen[*rec.RetailerCode] = i + 1
 			}
-			if err := excel.UpsertRetailerForRow(ctx, s.Store, rec); err == nil {
+			if err := excel.UpsertRetailerForRow(ctx, s.Store, uid, rec); err == nil {
 				// check opt-out
 				if rec.RetailerID != nil {
-					if r2, _ := s.Store.GetRetailer(ctx, *rec.RetailerID); r2 != nil && r2.IsOptedOut {
+					if r2, _ := s.Store.GetRetailer(ctx, uid, *rec.RetailerID); r2 != nil && r2.IsOptedOut {
 						optouts++
 						rec.IsValid = false
 						rec.ValidationErrors = append(rec.ValidationErrors, models.ValidationError{
@@ -213,7 +221,7 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 	// just-updated counts. Without this, the response's `batch.valid_rows`
 	// is stuck at 0 (from CreateBatch) and the UI hides the "Approve & open"
 	// button + phone preview, even though summary.valid is correct.
-	if fresh, err := s.Store.GetBatch(ctx, id); err == nil && fresh != nil {
+	if fresh, err := s.Store.GetBatch(ctx, uid, id); err == nil && fresh != nil {
 		*batch = *fresh
 	} else {
 		// Fall back to setting the counts inline if GetBatch ever fails.
@@ -239,12 +247,13 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ApproveBatch(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	b, err := s.Store.GetBatch(r.Context(), id)
+	b, err := s.Store.GetBatch(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -257,37 +266,42 @@ func (s *Server) ApproveBatch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "batch already in status "+b.Status)
 		return
 	}
-	// Resolve template
+	// Resolve template — front-end should pass ?template=NAME&lang=en
+	// explicitly (the BatchDetail picker now does). We DON'T fall back
+	// to a hard-coded name because each admin's template names are
+	// private; guessing wrong was the source of the previous
+	// "template not active: billing_summary_v1/en" error. If the
+	// caller forgets, we return 400 with a clear pointer to /templates.
 	tname := r.URL.Query().Get("template")
 	lang := r.URL.Query().Get("lang")
-	if tname == "" {
-		tname = "billing_summary_v1"
+	if tname == "" || lang == "" {
+		writeErr(w, http.StatusBadRequest,
+			"template not selected — pick one from your workspace on /admin/templates and pass ?template=NAME&lang=CODE")
+		return
 	}
-	if lang == "" {
-		lang = "en"
-	}
-	tpl, err := s.Store.GetActiveTemplate(r.Context(), tname, lang)
+	tpl, err := s.Store.GetActiveTemplate(r.Context(), uid, tname, lang)
 	if tpl == nil {
 		writeErr(w, http.StatusBadRequest, "template not active: "+tname+"/"+lang+" — add it under /templates first")
 		return
 	}
-	uid := middleware.UserID(r)
 	email := middleware.Email(r)
 	if err := s.Store.ApproveBatch(r.Context(), id, uid); err != nil {
 		writeErr(w, http.StatusInternalServerError, "approve: "+err.Error())
 		return
 	}
 	// Queue one job per valid billing record
-	recs, err := s.Store.ListBillingRecords(r.Context(), id, true)
+	recs, err := s.Store.ListBillingRecords(r.Context(), uid, id, true)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list records: "+err.Error())
 		return
 	}
 	queued := 0
+	owner := uid
 	for _, rec := range recs {
 		params := buildTemplateParams(rec, tpl.Body)
 		job := &models.MessageJob{
-			BatchID: id, BillingRecordID: rec.ID, RetailerID: rec.RetailerID,
+			AdminUserID: &owner,
+			BatchID:     id, BillingRecordID: rec.ID, RetailerID: rec.RetailerID,
 			ToNumber: *rec.WhatsappNumber, TemplateName: tpl.Name, LanguageCode: tpl.LanguageCode,
 			MaxAttempts: 3,
 		}
@@ -312,6 +326,63 @@ func (s *Server) ApproveBatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "queued": queued})
 }
 
+// ApproveBatchOnly flips a batch's status to 'approved' WITHOUT
+// queuing any message jobs. Use this when the admin wants to
+// stage the batch for AI follow-up tracking without committing to
+// the WhatsApp send yet. The existing ApproveBatch endpoint is the
+// one-shot "approve + queue + send" flow; this is the explicit
+// "approve now, send later" flow.
+//
+// Status transitions:
+//   validated → approved   (success)
+//   approved / sending / sent / completed → 409 Conflict
+//   missing / not owned → 404
+func (s *Server) ApproveBatchOnly(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
+	email := middleware.Email(r)
+	id, ok := int64PathParam(r, "id")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	// Ownership probe so a cross-tenant id returns 404 instead of
+	// silently no-op'ing (the SQL UPDATE on a non-owned batch
+	// would also no-op, but a 404 is a clearer signal).
+	b, err := s.Store.GetBatch(r.Context(), uid, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if b == nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if b.Status != "validated" {
+		writeErr(w, http.StatusConflict, "batch already in status "+b.Status)
+		return
+	}
+	if err := s.Store.ApproveBatchOnly(r.Context(), id, uid); err != nil {
+		// Race: someone else moved the batch off 'validated'
+		// between our probe and the UPDATE. Surface 409 — same
+		// shape as the eager conflict above.
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeErr(w, http.StatusConflict, "batch already in status approved (or further)")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "approve-only: "+err.Error())
+		return
+	}
+	ip := r.RemoteAddr
+	ua := r.UserAgent()
+	audit.Log(r.Context(), s.Store.DB, audit.Entry{
+		ActorID: &uid, ActorEmail: &email,
+		Action: "batch.approved_only", EntityType: strPtr("batch"), EntityID: &id,
+		Metadata: map[string]any{"note": "approve-only; no messages queued"},
+		IPAddress: &ip, UserAgent: &ua,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "queued": 0})
+}
+
 func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
@@ -332,12 +403,13 @@ func randHex(n int) string {
 //
 // Returns 404 if the batch has no valid rows to preview.
 func (s *Server) PreviewBatchMessage(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	b, err := s.Store.GetBatch(r.Context(), id)
+	b, err := s.Store.GetBatch(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -349,20 +421,19 @@ func (s *Server) PreviewBatchMessage(w http.ResponseWriter, r *http.Request) {
 
 	tname := r.URL.Query().Get("template")
 	lang := r.URL.Query().Get("lang")
-	if tname == "" {
-		tname = "billing_summary_v1"
+	if tname == "" || lang == "" {
+		writeErr(w, http.StatusBadRequest,
+			"template not selected — pick one from your workspace on /admin/templates and pass ?template=NAME&lang=CODE")
+		return
 	}
-	if lang == "" {
-		lang = "en"
-	}
-	tpl, err := s.Store.GetActiveTemplate(r.Context(), tname, lang)
+	tpl, err := s.Store.GetActiveTemplate(r.Context(), uid, tname, lang)
 	if tpl == nil {
 		writeErr(w, http.StatusBadRequest, "template not active: "+tname+"/"+lang)
 		return
 	}
 
 	// Pull valid rows, then pick the requested one (or first).
-	recs, err := s.Store.ListBillingRecords(r.Context(), id, true)
+	recs, err := s.Store.ListBillingRecords(r.Context(), uid, id, true)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -418,6 +489,276 @@ func (s *Server) PreviewBatchMessage(w http.ResponseWriter, r *http.Request) {
 		"retailer_name":    name,
 		"whatsapp_number":  phone,
 		"template_params":  params,
+	})
+}
+
+// PatchBatch is the small update endpoint used by the inline-editable
+// batch name on /admin/batches/{id}. Today it only accepts
+// `display_name` — pass a string to set, null to clear, an empty
+// string is treated as "clear" so the trigger can collapse it to NULL.
+//
+// Validation:
+//   - display_name must be a string, may be null, may be empty (→ NULL)
+//   - length must be ≤ 100 chars (also enforced by migration 023's CHECK)
+//
+// Behaviour:
+//   - 200 OK with the updated batch on success
+//   - 400 on validation failure
+//   - 404 on missing or cross-tenant batch
+func (s *Server) PatchBatch(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
+	email := middleware.Email(r)
+	id, ok := int64PathParam(r, "id")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+
+	// Body is tiny — cap at the same limit used for other small JSON
+	// payloads. Reject bodies we can't parse BEFORE touching the DB so
+	// we don't waste a probe round-trip.
+	var body struct {
+		DisplayName *string `json:"display_name"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, s.Cfg.MaxJSONBytes)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad json: "+err.Error())
+		return
+	}
+
+	// Normalise: empty string → nil so the DB trigger can collapse it
+	// to NULL and the UI can show "no override". Length cap matches
+	// the migration CHECK constraint.
+	if body.DisplayName != nil {
+		trimmed := strings.TrimSpace(*body.DisplayName)
+		if trimmed == "" {
+			body.DisplayName = nil
+		} else if len(trimmed) > 100 {
+			writeErr(w, http.StatusBadRequest, "display_name must be 100 characters or fewer")
+			return
+		} else {
+			body.DisplayName = &trimmed
+		}
+	}
+
+	updated, err := s.Store.UpdateBatchDisplayName(r.Context(), uid, id, body.DisplayName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeErr(w, http.StatusNotFound, "batch not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "rename: "+err.Error())
+		return
+	}
+
+	ip := middleware.IP(r)
+	ua := middleware.UA(r)
+	meta := map[string]any{}
+	if body.DisplayName == nil {
+		meta["cleared"] = true
+	} else {
+		meta["display_name"] = *body.DisplayName
+	}
+	audit.Log(r.Context(), s.Store.DB, audit.Entry{
+		ActorID: &uid, ActorEmail: &email,
+		Action: "batch.renamed", EntityType: strPtr("batch"), EntityID: &id,
+		Metadata: meta,
+		IPAddress: &ip, UserAgent: &ua,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{"batch": updated})
+}
+
+// ResendBatch creates a NEW round of message jobs for an already-sent
+// (or at-least-once-validated) batch. This is intentionally distinct
+// from POST /api/messages/resend-failed which only retries rows that
+// hit a transient Meta error — ResendBatch is the operator's "send
+// the same recipients a new reminder" affordance.
+//
+// Scope:
+//   - default: all currently valid billing_records in the batch
+//   - only_failed=true: only the rows whose latest message_job is failed
+//   - row_numbers=[n,m,...]: explicit subset of row_number values
+//
+// Template:
+//   - ?template=NAME&lang=CODE  (same convention as ApproveBatch)
+//
+// What this does NOT do:
+//   - does not flip the batch status. The original approval is
+//     preserved (completed/failed/apprvoed/etc) so the audit trail
+//     remains truthful. The new jobs are queued and the worker picks
+//     them up immediately.
+//   - does not touch bc_batch_ai_recipients or any CRM sequences.
+//     Those are sequenced against the original approval and stay
+//     unchanged.
+//
+// Returns { ok, queued, skipped } where `skipped` counts rows that
+// were either opted-out, had no whatsapp number, or were filtered
+// out by the scope rules.
+func (s *Server) ResendBatch(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
+	email := middleware.Email(r)
+	id, ok := int64PathParam(r, "id")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+
+	b, err := s.Store.GetBatch(r.Context(), uid, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if b == nil {
+		writeErr(w, http.StatusNotFound, "batch not found")
+		return
+	}
+	if b.ValidRows == 0 {
+		writeErr(w, http.StatusBadRequest, "batch has no valid rows to resend")
+		return
+	}
+	if b.Status == "validated" {
+		// 'validated' means the admin hasn't approved the batch yet,
+		// so "resend" is the wrong verb — point them at Approve & Send.
+		writeErr(w, http.StatusConflict, "batch has not been sent yet — use Approve & Send instead")
+		return
+	}
+
+	tname := r.URL.Query().Get("template")
+	lang := r.URL.Query().Get("lang")
+	if tname == "" || lang == "" {
+		writeErr(w, http.StatusBadRequest,
+			"template not selected — pick one from your workspace on /admin/templates and pass ?template=NAME&lang=CODE")
+		return
+	}
+	tpl, err := s.Store.GetActiveTemplate(r.Context(), uid, tname, lang)
+	if tpl == nil {
+		writeErr(w, http.StatusBadRequest, "template not active: "+tname+"/"+lang)
+		return
+	}
+
+	// Optional scope body. Defaults to "all valid rows". We accept the
+	// body silently — unknown keys are ignored so the frontend can
+	// grow the API without coordination.
+	var scope struct {
+		OnlyFailed  bool       `json:"only_failed"`
+		RowNumbers  []int      `json:"row_numbers"`
+	}
+	// Body is optional and tiny; MaxBytesReader cap matches PatchBatch.
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, s.Cfg.MaxJSONBytes)).Decode(&scope); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad json: "+err.Error())
+			return
+		}
+	}
+
+	recs, err := s.Store.ListBillingRecords(r.Context(), uid, id, true)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list records: "+err.Error())
+		return
+	}
+
+	// Build a quick lookup of "row_number → latest job status" when
+	// only_failed is requested. We pull all jobs once and reduce in Go
+	// rather than writing SQL — the batches table is small enough
+	// that this is fine and it keeps the store API stable.
+	failedRows := map[int]struct{}{}
+	if scope.OnlyFailed {
+		jobs, err := s.Store.ListJobsByBatch(r.Context(), uid, id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "list jobs: "+err.Error())
+			return
+		}
+		// We want "most recent status per billing_record_id". Walk
+		// the jobs in ASC id order and remember only the last seen
+		// status per row; if it's 'failed', mark for inclusion.
+		latest := map[int64]string{}
+		for _, j := range jobs {
+			latest[j.BillingRecordID] = j.Status
+		}
+		for _, rec := range recs {
+			if status, ok := latest[rec.ID]; ok && status == "failed" {
+				failedRows[rec.RowNumber] = struct{}{}
+			}
+		}
+	}
+
+	rowSet := map[int]struct{}{}
+	if len(scope.RowNumbers) > 0 {
+		for _, n := range scope.RowNumbers {
+			rowSet[n] = struct{}{}
+		}
+	}
+
+	queued, skipped := 0, 0
+	owner := uid
+	for _, rec := range recs {
+		// Skip opt-outs and missing phone numbers — same safety as the
+		// initial ApproveBatch fan-out.
+		if rec.WhatsappNumber == nil || *rec.WhatsappNumber == "" {
+			skipped++
+			continue
+		}
+		if rec.RetailerID != nil {
+			if r2, _ := s.Store.GetRetailer(r.Context(), uid, *rec.RetailerID); r2 != nil && r2.IsOptedOut {
+				skipped++
+				continue
+			}
+		}
+
+		if scope.OnlyFailed {
+			if _, ok := failedRows[rec.RowNumber]; !ok {
+				skipped++
+				continue
+			}
+		}
+		if len(rowSet) > 0 {
+			if _, ok := rowSet[rec.RowNumber]; !ok {
+				skipped++
+				continue
+			}
+		}
+
+		params := buildTemplateParams(rec, tpl.Body)
+		job := &models.MessageJob{
+			AdminUserID: &owner,
+			BatchID:     id, BillingRecordID: rec.ID, RetailerID: rec.RetailerID,
+			ToNumber: *rec.WhatsappNumber, TemplateName: tpl.Name, LanguageCode: tpl.LanguageCode,
+			MaxAttempts: 3,
+		}
+		job.TemplateParams = mustJSON(params)
+		jobID, err := s.Store.CreateMessageJob(r.Context(), job)
+		if err != nil {
+			skipped++
+			continue
+		}
+		// Same overwrite pattern ApproveBatch uses — billing_records
+		// holds a pointer to the LATEST job for that row, so the
+		// Resend job takes its place for "retry this row" purposes.
+		_ = s.Store.SetBillingRecordJob(r.Context(), rec.ID, jobID)
+		_ = s.Queue.Enqueue(r.Context(), queueJob(jobID, rec, tpl, params))
+		queued++
+	}
+
+	ip := middleware.IP(r)
+	ua := middleware.UA(r)
+	audit.Log(r.Context(), s.Store.DB, audit.Entry{
+		ActorID: &uid, ActorEmail: &email,
+		Action: "batch.resent", EntityType: strPtr("batch"), EntityID: &id,
+		Metadata: map[string]any{
+			"queued":       queued,
+			"skipped":      skipped,
+			"template":     tpl.Name,
+			"lang":         tpl.LanguageCode,
+			"only_failed":  scope.OnlyFailed,
+			"row_numbers":  scope.RowNumbers,
+		},
+		IPAddress: &ip, UserAgent: &ua,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"queued":  queued,
+		"skipped": skipped,
 	})
 }
 

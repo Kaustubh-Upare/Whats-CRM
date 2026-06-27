@@ -3,18 +3,710 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; }
-body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-soft);
+  color: var(--fg);
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Theme variables — light is the default; .dark on <html> flips everything */
+/* ----------------------------------------------------------------------- */
+:root {
+  /* Surfaces — three distinct elevations so cards sit above rows sit
+     above the canvas. Light mode reads as premium paper, not flat
+     white-on-white. */
+  --bg:                #ffffff;
+  --bg-soft:           #f6f9fc;        /* page canvas — barely-tinted slate */
+  --bg-elevated:       #ffffff;        /* cards & panels */
+  --bg-subtle:         #f1f5f9;        /* table rows, hovered list rows */
+  --fg:                #0b1220;        /* slate-950 — true near-black for max contrast */
+  --fg-muted:          #475569;        /* slate-600 */
+  --fg-subtle:         #64748b;        /* slate-500 */
+  --border:            rgba(15,23,42,0.10);
+  --border-strong:     rgba(15,23,42,0.18);
+  --input-bg:          #ffffff;
+  --input-border:      #cbd5e1;        /* slate-300 */
+  --input-focus-ring:  rgba(16,185,129,0.45);
+  /* Glass (used by landing + how-it-works) */
+  --glass-bg:          rgba(255,255,255,0.55);
+  --glass-bg-strong:   rgba(255,255,255,0.70);
+  --glass-border:      rgba(255,255,255,0.60);
+  --glass-border-strong: rgba(255,255,255,0.70);
+  --glass-shadow:      0 8px 32px rgba(15,23,42,0.08);
+  --glass-shadow-strong: 0 12px 44px rgba(15,23,42,0.12);
+  --glass-highlight:   linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,255,255,0.15) 40%, rgba(34,197,94,0.30) 70%, rgba(6,182,212,0.55));
+  /* Decorations */
+  --grid-line:         rgba(15,23,42,0.05);
+  --noise-blend:       overlay;
+  --noise-opacity:     0.04;
+  --divider:           rgba(15,23,42,0.10);
+  --ring-dashed:       rgba(34,197,94,0.45);
+  --ring-dashed-2:     rgba(139,92,246,0.45);
+  --scrollbar-thumb:   #cbd5e1;
+  --scrollbar-thumb-hover: #94a3b8;
+  /* mock-internal surface (KPI tiles, table rows, chat bubbles in mocks) */
+  --mock-surface:        rgba(255,255,255,0.60);
+  --mock-surface-border: rgba(255,255,255,0.70);
+  --mock-text:           #0f172a;
+  --mock-text-muted:     #475569;
+  /* Nav scrolled */
+  --nav-scrolled-bg:     rgba(255,255,255,0.85);
+  --nav-idle-bg:         rgba(255,255,255,0.40);
+  /* Aurora blobs (subtle in light, vivid in dark) */
+  --aurora-1:           rgba(16,185,129,0.10);
+  --aurora-2:           rgba(139,92,246,0.08);
+  --aurora-3:           rgba(6,182,212,0.08);
+  --aurora-4:           rgba(245,158,11,0.06);
+}
+
+.dark {
+  /* Surfaces — use a layered slate scale so the canvas, sidebar and
+     cards sit at three distinct elevations without competing for the
+     same tone. The result reads as "premium dark" rather than "flat
+     black-on-black". */
+  --bg:                #020617;        /* slate-950 — page canvas */
+  --bg-soft:           #0a1124;        /* slightly lifted from canvas */
+  --bg-elevated:       #111a2f;        /* cards & panels */
+  --bg-subtle:         #0f172a;        /* table rows, hovered list rows */
+  --fg:                #f8fafc;        /* slate-50 */
+  --fg-muted:          #cbd5e1;        /* slate-300 */
+  --fg-subtle:         #94a3b8;        /* slate-400 */
+  --border:            rgba(148,163,184,0.14);
+  --border-strong:     rgba(148,163,184,0.22);
+  --input-bg:          #0f172a;
+  --input-border:      rgba(148,163,184,0.22);
+  --input-focus-ring:  rgba(52,211,153,0.55);
+  /* Glass */
+  --glass-bg:          rgba(15,23,42,0.55);
+  --glass-bg-strong:   rgba(15,23,42,0.70);
+  --glass-border:      rgba(255,255,255,0.10);
+  --glass-border-strong: rgba(255,255,255,0.16);
+  --glass-shadow:      0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05);
+  --glass-shadow-strong: 0 16px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.07);
+  --glass-highlight:   linear-gradient(135deg, rgba(255,255,255,0.22), rgba(255,255,255,0.04) 40%, rgba(52,211,153,0.20) 70%, rgba(34,211,238,0.32));
+  /* Decorations */
+  --grid-line:         rgba(148,163,184,0.06);
+  --noise-blend:       soft-light;
+  --noise-opacity:     0.05;
+  --divider:           rgba(148,163,184,0.12);
+  --ring-dashed:       rgba(52,211,153,0.65);
+  --ring-dashed-2:     rgba(167,139,250,0.65);
+  --scrollbar-thumb:   #1e293b;
+  --scrollbar-thumb-hover: #334155;
+  --mock-surface:        rgba(255,255,255,0.04);
+  --mock-surface-border: rgba(255,255,255,0.10);
+  --mock-text:           #f8fafc;
+  --mock-text-muted:     #cbd5e1;
+  --nav-scrolled-bg:     rgba(2,6,23,0.85);
+  --nav-idle-bg:         rgba(15,23,42,0.55);
+  /* Aurora blobs — vivid in dark mode for cinematic depth */
+  --aurora-1:           rgba(16,185,129,0.22);
+  --aurora-2:           rgba(139,92,246,0.18);
+  --aurora-3:           rgba(6,182,212,0.18);
+  --aurora-4:           rgba(245,158,11,0.14);
+}
 
 /* Pretty scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* Selection colour — uses the brand green so it doesn't read as the
+   browser default on a dark canvas. */
+::selection {
+  background: rgba(52, 211, 153, 0.35);
+  color: var(--fg);
+}
+
+/* Pretty scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
 /* Status pill colors used everywhere */
 .pill { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium; }
-.pill-gray   { @apply pill bg-slate-100 text-slate-700; }
-.pill-blue   { @apply pill bg-blue-100 text-blue-700; }
-.pill-amber  { @apply pill bg-amber-100 text-amber-800; }
-.pill-green  { @apply pill bg-emerald-100 text-emerald-700; }
-.pill-purple { @apply pill bg-violet-100 text-violet-700; }
-.pill-red    { @apply pill bg-rose-100 text-rose-700; }
+.pill-gray   { @apply pill bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300; }
+.pill-blue   { @apply pill bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300; }
+.pill-amber  { @apply pill bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300; }
+.pill-green  { @apply pill bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300; }
+.pill-purple { @apply pill bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300; }
+.pill-red    { @apply pill bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300; }
+.pill-emerald{ @apply pill bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300; }
+
+/* ----------------------------------------------------------------------- */
+/* Glassmorphism utilities — landing page only                             */
+/* ----------------------------------------------------------------------- */
+@layer components {
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(150%);
+    -webkit-backdrop-filter: blur(24px) saturate(150%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+  .glass-strong {
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(28px) saturate(150%);
+    -webkit-backdrop-filter: blur(28px) saturate(150%);
+    border: 1px solid var(--glass-border-strong);
+    box-shadow: var(--glass-shadow-strong);
+  }
+  .glass-dark {
+    @apply bg-slate-900/55 backdrop-blur-xl backdrop-saturate-150
+           border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.25)]
+           text-white;
+  }
+  .glass-card {
+    @apply rounded-2xl glass;
+  }
+  .text-gradient {
+    @apply bg-clip-text text-transparent
+           bg-gradient-to-br from-brand-600 via-emerald-500 to-teal-500
+           dark:from-emerald-400 dark:via-cyan-400 dark:to-teal-400;
+  }
+  .text-gradient-aurora {
+    @apply bg-clip-text text-transparent
+           bg-[linear-gradient(120deg,#22c55e_0%,#06b6d4_35%,#8b5cf6_70%,#ec4899_100%)];
+  }
+
+  /* Premium glass — extra inner glow + tighter highlight */
+  .glass-premium {
+    background: var(--glass-bg);
+    backdrop-filter: blur(28px) saturate(150%);
+    -webkit-backdrop-filter: blur(28px) saturate(150%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow-strong);
+  }
+}
+
+/* ----------------------------------------------------------------------- */
+/* Animations used by the Landing page                                     */
+/* ----------------------------------------------------------------------- */
+@keyframes aurora-shift {
+  0%, 100% { transform: translate3d(0,0,0) scale(1); opacity: 0.85; }
+  50%      { transform: translate3d(2%, -3%, 0) scale(1.08); opacity: 1; }
+}
+@keyframes float-slow {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(24px, -32px); }
+}
+@keyframes float-reverse {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(-18px, 24px); }
+}
+@keyframes drift {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  50%      { transform: translate(-14px, 18px) rotate(2deg); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+@keyframes blob-pulse {
+  0%, 100% { transform: scale(1) translate(0, 0); }
+  33%      { transform: scale(1.06) translate(2%, -1%); }
+  66%      { transform: scale(0.97) translate(-2%, 1%); }
+}
+@keyframes gradient-pan {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+@keyframes ring-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes typing-dot {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
+  40%           { transform: scale(1);   opacity: 1; }
+}
+@keyframes conic-spin {
+  from { --angle: 0deg; }
+  to   { --angle: 360deg; }
+}
+@property --angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.aurora-blob {
+  filter: blur(80px);
+  will-change: transform, opacity;
+}
+.aurora-1 { animation: aurora-shift 14s ease-in-out infinite; }
+.aurora-2 { animation: aurora-shift 18s ease-in-out infinite reverse; }
+.aurora-3 { animation: aurora-shift 22s ease-in-out infinite; }
+.aurora-4 { animation: aurora-shift 16s ease-in-out infinite reverse; }
+
+.float-slow      { animation: float-slow 9s ease-in-out infinite; }
+.float-slower    { animation: float-slow 13s ease-in-out infinite; }
+.float-reverse   { animation: float-reverse 11s ease-in-out infinite; }
+.drift           { animation: drift 10s ease-in-out infinite; }
+.blob-pulse      { animation: blob-pulse 12s ease-in-out infinite; }
+
+.shimmer-text {
+  background: linear-gradient(90deg, #0f172a 0%, #25a25f 30%, #06b6d4 50%, #25a25f 70%, #0f172a 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  color: transparent;
+  animation: shimmer 6s linear infinite;
+}
+.dark .shimmer-text {
+  background: linear-gradient(90deg, #f8fafc 0%, #34d399 30%, #22d3ee 50%, #34d399 70%, #f8fafc 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  color: transparent;
+}
+
+.gradient-pan {
+  background-size: 200% 200%;
+  animation: gradient-pan 8s ease-in-out infinite;
+}
+
+.ring-spin-slow { animation: ring-rotate 30s linear infinite; }
+.ring-spin-rev  { animation: ring-rotate 40s linear infinite reverse; }
+
+.typing-dot {
+  animation: typing-dot 1.4s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.18s; }
+.typing-dot:nth-child(3) { animation-delay: 0.36s; }
+
+.glass-highlight {
+  position: relative;
+  overflow: hidden;
+}
+.glass-highlight::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--glass-highlight);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+
+.conic-border {
+  position: relative;
+}
+.conic-border::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(from var(--angle), #22c55e, #06b6d4, #8b5cf6, #ec4899, #22c55e);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: conic-spin 6s linear infinite;
+  pointer-events: none;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Premium additions (used by the rebuilt Landing page)                    */
+/* ----------------------------------------------------------------------- */
+
+/* SVG noise texture (inline data URI; ~1KB) for cinematic depth */
+.noise-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--noise-opacity);
+  mix-blend-mode: var(--noise-blend);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.85'/></svg>");
+}
+
+/* 1px horizontal divider with a fade */
+.divider-fade {
+  background: linear-gradient(90deg, transparent 0%, var(--divider) 50%, transparent 100%);
+  height: 1px;
+  width: 100%;
+}
+
+/* Dashed ring that spins slowly */
+.ring-dashed-spin {
+  border: 1px dashed var(--ring-dashed);
+  border-radius: 9999px;
+  animation: ring-rotate 24s linear infinite;
+}
+.ring-dashed-spin-2 {
+  border: 1px dashed var(--ring-dashed-2);
+  border-radius: 9999px;
+  animation: ring-rotate 32s linear infinite reverse;
+}
+
+/* Display type scale */
+.text-display {
+  letter-spacing: -0.03em;
+  font-weight: 600;
+  line-height: 1.02;
+}
+
+/* Animated connector line used by the workflow section */
+.connector-line {
+  background: linear-gradient(90deg, rgba(16,185,129,0) 0%, rgba(16,185,129,0.7) 50%, rgba(6,182,212,0) 100%);
+  height: 1px;
+  width: 100%;
+  transform-origin: 0% 50%;
+}
+.dark .connector-line {
+  background: linear-gradient(90deg, rgba(16,185,129,0) 0%, rgba(16,185,129,0.85) 50%, rgba(6,182,212,0) 100%);
+}
+
+/* subtle grid overlay used by the aurora hero */
+.grid-overlay {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+}
+
+/* Mock-internal surface helpers (used inside glass mocks) */
+.mock-surface {
+  background: var(--mock-surface);
+  border-color: var(--mock-surface-border);
+  color: var(--mock-text);
+}
+.mock-text-muted { color: var(--mock-text-muted); }
+
+/* prefers-reduced-motion guard */
+@media (prefers-reduced-motion: reduce) {
+  .aurora-1, .aurora-2, .aurora-3, .aurora-4,
+  .float-slow, .float-slower, .float-reverse, .drift,
+  .blob-pulse, .shimmer-text, .gradient-pan,
+  .ring-spin-slow, .ring-spin-rev, .typing-dot,
+  .ring-dashed-spin, .ring-dashed-spin-2,
+  .conic-border::after {
+    animation: none !important;
+  }
+}
+
+/* ----------------------------------------------------------------------- */
+/* Admin dark-mode helpers                                                  */
+/* ----------------------------------------------------------------------- */
+
+/* Dark-mode safety net — admin pages still ship some light-only Tailwind
+ * classes (bg-white, text-slate-800, border-slate-200, hover:bg-slate-50).
+ * Rather than rewrite every line of every page, this block uses an
+ * `.dark-on` opt-in wrapper to recolour those patterns automatically.
+ *
+ * IMPORTANT: every rule is scoped under `.dark .dark-on` so it only
+ * fires in dark mode. The `!important` is necessary to override the
+ * base Tailwind classes — without the `.dark` prefix the safety net
+ * was firing in light mode too, painting light-mode text as light
+ * slate and making everything look washed out. */
+.dark .dark-on {
+  /* Backgrounds */
+  --on-bg:        var(--bg-elevated);
+  --on-bg-soft:   rgba(148,163,184,0.06);
+  --on-bg-input:  var(--input-bg);
+  /* Borders */
+  --on-border:    var(--border);
+  --on-divider:   rgba(148,163,184,0.10);
+  /* Text */
+  --on-fg:        #f1f5f9;
+  --on-fg-muted:  #cbd5e1;
+  --on-fg-subtle: #94a3b8;
+}
+.dark .dark-on .bg-white:not(.mock-chrome):not(.mock-surface):not([class*="bg-white/"]):not(.glass):not(.admin-aurora):not(.admin-grid) {
+  background-color: var(--on-bg) !important;
+}
+.dark .dark-on .bg-slate-50:not([class*="bg-slate-50/"]):not(.mock-surface) {
+  background-color: var(--on-bg-soft) !important;
+}
+.dark .dark-on .bg-slate-100 { background-color: rgba(148,163,184,0.10) !important; }
+.dark .dark-on .bg-slate-200 { background-color: rgba(148,163,184,0.14) !important; }
+.dark .dark-on .border-slate-200:not([class*="border-slate-200/"]) { border-color: var(--on-border) !important; }
+.dark .dark-on .border-slate-200\/70 { border-color: var(--on-border) !important; }
+.dark .dark-on .border-slate-100 { border-color: var(--on-divider) !important; }
+.dark .dark-on .divide-slate-100 > * + * { border-color: var(--on-divider) !important; }
+.dark .dark-on .divide-slate-200 > * + * { border-color: var(--on-divider) !important; }
+.dark .dark-on .border-slate-300 { border-color: rgba(148,163,184,0.22) !important; }
+.dark .dark-on .text-slate-900 { color: var(--on-fg) !important; }
+.dark .dark-on .text-slate-800 { color: #f1f5f9 !important; }
+.dark .dark-on .text-slate-700 { color: #e2e8f0 !important; }
+.dark .dark-on .text-slate-600 { color: var(--on-fg-muted) !important; }
+.dark .dark-on .text-slate-500 { color: var(--on-fg-subtle) !important; }
+.dark .dark-on .text-slate-400 { color: #94a3b8 !important; }
+.dark .dark-on .placeholder\:text-slate-400::placeholder { color: #64748b !important; }
+.dark .dark-on .placeholder\:text-slate-500::placeholder { color: #64748b !important; }
+.dark .dark-on .hover\:bg-slate-50:hover { background-color: rgba(148,163,184,0.06) !important; }
+.dark .dark-on .hover\:bg-slate-100:hover { background-color: rgba(148,163,184,0.10) !important; }
+.dark .dark-on .hover\:bg-brand-50:hover { background-color: rgba(16,185,129,0.15) !important; }
+.dark .dark-on .hover\:text-slate-900:hover { color: #f8fafc !important; }
+.dark .dark-on .text-slate-300 { color: #cbd5e1 !important; }
+.dark .dark-on .text-slate-200 { color: #e2e8f0 !important; }
+.dark .dark-on .text-slate-100 { color: #f1f5f9 !important; }
+.dark .dark-on input,
+.dark .dark-on select,
+.dark .dark-on textarea {
+  background-color: var(--on-bg-input) !important;
+  border-color: rgba(148,163,184,0.22) !important;
+  color: var(--on-fg) !important;
+}
+.dark .dark-on input::placeholder,
+.dark .dark-on textarea::placeholder { color: #64748b !important; }
+.dark .dark-on .pill-gray { background-color: rgba(148,163,184,0.15) !important; color: #cbd5e1 !important; }
+.dark .dark-on code:not(pre code) {
+  background-color: rgba(148,163,184,0.10) !important;
+  color: #f1f5f9 !important;
+}
+/* Date input controls (Chats / Reports / Settings) — they're `<input
+ * type="date">` so Tailwind doesn't have a dedicated class; CSS handles
+ * both the date picker icon and the inner text colour. */
+.dark .dark-on input[type="date"],
+.dark .dark-on input[type="datetime-local"] {
+  color-scheme: dark;
+  background-color: var(--on-bg-input);
+  border-color: rgba(148,163,184,0.22);
+  color: var(--on-fg);
+}
+/* The simulate-inbound / generic modal overlays (dark semi-transparent
+ * over the page) */
+.dark .dark-on .bg-slate-900\/40 { background-color: rgba(2,6,23,0.65) !important; }
+/* Light pastel tints that don't have a `dark:` variant on Chats
+ * conversation-row avatars + bubbles */
+.dark .dark-on .bg-emerald-50 { background-color: rgba(16,185,129,0.15) !important; color: #6ee7b7 !important; }
+.dark .dark-on .border-emerald-200 { border-color: rgba(16,185,129,0.30) !important; }
+.dark .dark-on .text-emerald-700 { color: #6ee7b7 !important; }
+.dark .dark-on .bg-sky-50 { background-color: rgba(56,189,248,0.15) !important; color: #7dd3fc !important; }
+.dark .dark-on .border-sky-200 { border-color: rgba(56,189,248,0.30) !important; }
+.dark .dark-on .text-sky-700 { color: #7dd3fc !important; }
+.dark .dark-on .bg-rose-50 { background-color: rgba(244,63,94,0.15) !important; color: #fda4af !important; }
+.dark .dark-on .border-rose-200 { border-color: rgba(244,63,94,0.30) !important; }
+.dark .dark-on .text-rose-700 { color: #fda4af !important; }
+.dark .dark-on .hover\:bg-rose-100:hover { background-color: rgba(244,63,94,0.20) !important; }
+.dark .dark-on .bg-violet-50 { background-color: rgba(139,92,246,0.15) !important; color: #c4b5fd !important; }
+.dark .dark-on .border-violet-200 { border-color: rgba(139,92,246,0.30) !important; }
+.dark .dark-on .text-violet-700 { color: #c4b5fd !important; }
+.dark .dark-on .bg-amber-50 { background-color: rgba(245,158,11,0.15) !important; color: #fcd34d !important; }
+.dark .dark-on .border-amber-200 { border-color: rgba(245,158,11,0.30) !important; }
+.dark .dark-on .text-amber-700 { color: #fcd34d !important; }
+.dark .dark-on .bg-lime-50 { background-color: rgba(132,204,22,0.15) !important; color: #bef264 !important; }
+.dark .dark-on .border-lime-200 { border-color: rgba(132,204,22,0.30) !important; }
+.dark .dark-on .text-lime-700 { color: #bef264 !important; }
+.dark .dark-on .bg-cyan-50 { background-color: rgba(6,182,212,0.15) !important; color: #67e8f9 !important; }
+.dark .dark-on .border-cyan-200 { border-color: rgba(6,182,212,0.30) !important; }
+.dark .dark-on .text-cyan-700 { color: #67e8f9 !important; }
+.dark .dark-on .bg-white\/80 { background-color: rgba(15,23,42,0.70) !important; backdrop-filter: blur(12px); }
+.dark .dark-on .bg-slate-50\/60 { background-color: rgba(148,163,184,0.06) !important; }
+.dark .dark-on .bg-slate-100 { background-color: rgba(148,163,184,0.10) !important; }
+.dark .dark-on .text-slate-600 { color: #cbd5e1 !important; }
+.dark .dark-on .text-slate-300 { color: #cbd5e1 !important; }
+/* The Chats page outer wrapper uses bg-slate-50; we want a near-black
+ * canvas with a subtle aurora tint to feel like a messaging app */
+.dark .dark-on .bg-slate-50:not([class*="bg-slate-50/"]):not(.mock-surface) {
+  background-color: #020617 !important;
+  background-image:
+    radial-gradient(ellipse at top left, rgba(16,185,129,0.06), transparent 55%),
+    radial-gradient(ellipse at bottom right, rgba(139,92,246,0.05), transparent 60%) !important;
+}
+/* WhatsApp chat-thread background dots — keep the texture visible in dark
+ * mode by inverting the dot colour to a faint white. */
+.dark .dark-on .bg-\[\#f0f2f5\] {
+  background-color: #0f1a2f !important;
+  background-image:
+    radial-gradient(circle at 20px 20px, rgba(148,163,184,0.10) 1px, transparent 1.5px) !important;
+}
+/* Outbound bubble green — keep it WhatsApp-green but with a touch more
+ * contrast on the dark canvas. */
+.dark .dark-on .bg-\[\#d9fdd3\] {
+  background-color: #1f4d3a !important;
+  color: #d1fae5 !important;
+}
+/* Modal panel + summary-card surfaces that don't have explicit dark: */
+.dark .dark-on .bg-white\/70 { background-color: rgba(15,23,42,0.55) !important; }
+
+/* Aurora backdrop for the admin pages — a soft moving gradient that
+   sits behind the content in dark mode and tints the page edges with
+   the brand greens. In light mode it's barely visible (matches the
+   marketing landing's whisper-soft treatment). */
+.admin-aurora {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.admin-aurora::before,
+.admin-aurora::after {
+  content: '';
+  position: absolute;
+  width: 36rem;
+  height: 36rem;
+  border-radius: 9999px;
+  filter: blur(100px);
+  opacity: 0.9;
+}
+.admin-aurora::before {
+  background: var(--aurora-1);
+  top: -8rem;
+  left: -8rem;
+  animation: aurora-shift 18s ease-in-out infinite;
+}
+.admin-aurora::after {
+  background: var(--aurora-2);
+  bottom: -10rem;
+  right: -10rem;
+  animation: aurora-shift 22s ease-in-out infinite reverse;
+}
+
+/* Subtle dot-grid on the admin canvas — keeps it from feeling flat. */
+.admin-grid {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: radial-gradient(var(--grid-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse at center, black 10%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 10%, transparent 70%);
+}
+
+/* Light-mode page wash — a barely-there brand-green wash in the
+ * top-left + a violet whisper in the bottom-right. Same positioning as
+ * the dark-mode aurora so the visual rhythm carries across themes. */
+.admin-aurora-light {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.admin-aurora-light::before,
+.admin-aurora-light::after {
+  content: '';
+  position: absolute;
+  width: 36rem;
+  height: 36rem;
+  border-radius: 9999px;
+  filter: blur(120px);
+  opacity: 0.55;
+}
+.admin-aurora-light::before {
+  background: var(--aurora-1);
+  top: -10rem;
+  left: -10rem;
+  animation: aurora-shift 22s ease-in-out infinite;
+}
+.admin-aurora-light::after {
+  background: var(--aurora-2);
+  bottom: -12rem;
+  right: -12rem;
+  animation: aurora-shift 26s ease-in-out infinite reverse;
+}
+.dark .admin-aurora-light { display: none; }
+
+/* Premium admin card — auto-flips via CSS variables. Drop-in
+   replacement for `Card` on admin pages. */
+.admin-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.60) inset,
+    0 1px 2px rgba(15,23,42,0.04),
+    0 12px 32px -16px rgba(15,23,42,0.12);
+  transition: box-shadow 200ms ease, border-color 200ms ease;
+}
+.admin-card:hover {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.60) inset,
+    0 1px 2px rgba(15,23,42,0.04),
+    0 20px 40px -16px rgba(15,23,42,0.18);
+}
+.dark .admin-card {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 100%),
+    var(--bg-elevated);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.04) inset,
+    0 12px 32px -16px rgba(0,0,0,0.45);
+}
+.dark .admin-card:hover {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.04) inset,
+    0 20px 40px -16px rgba(0,0,0,0.55);
+}
+
+/* The accent dot shown next to KPI tile labels */
+.kpi-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  box-shadow: 0 0 12px currentColor;
+}
+
+/* Brand-coloured "active" nav pill used by the admin sidebar. */
+.admin-nav-active {
+  background: linear-gradient(90deg,
+    rgba(16,185,129,0.18) 0%,
+    rgba(6,182,212,0.10) 100%);
+  border: 1px solid rgba(52,211,153,0.25);
+  color: var(--fg);
+}
+.dark .admin-nav-active {
+  background: linear-gradient(90deg,
+    rgba(16,185,129,0.22) 0%,
+    rgba(6,182,212,0.12) 100%);
+  border-color: rgba(52,211,153,0.30);
+}
+
+/* ----------------------------------------------------------------------- */
+/* Chats page — themed chat-thread background                              */
+/* ----------------------------------------------------------------------- */
+/* Inline styles on the ThreadPane can be touched by the safety net, so
+ * we move them to a class. Light mode keeps the WhatsApp-like beige
+ * with subtle white dots; dark mode flips to a deep navy with faint
+ * white dots so the bubbles still pop. */
+.chat-thread-bg {
+  background-color: #f0f2f5;
+  background-image: radial-gradient(circle at 20px 20px, rgba(255,255,255,0.7) 1px, transparent 1.5px);
+  background-size: 32px 32px;
+}
+.dark .dark-on .chat-thread-bg {
+  background-color: #0f1a2f;
+  background-image: radial-gradient(circle at 20px 20px, rgba(148,163,184,0.10) 1px, transparent 1.5px);
+}
+
+/* ----------------------------------------------------------------------- */
+/* Phone-screen mockup — preserve a real-looking phone UI in both modes    */
+/* ----------------------------------------------------------------------- */
+/* The phone screen is a mockup of a chat app, not real chrome. It uses
+ * hard-coded WhatsApp greens and dark text inside a light phone. The
+ * `.dark-on` safety net above flips bg-white → dark, which makes the
+ * bubble text vanish (dark text on dark bg) and the chat bg look wrong.
+ * We re-assert the light-phone look inside `.phone-screen` with !important
+ * so the mockup is identical in both themes. */
+.phone-screen {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+.dark .dark-on .phone-screen {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+.dark .dark-on .phone-screen .bg-white { background-color: #ffffff !important; }
+.dark .dark-on .phone-screen .bg-\[\#E5DDD5\] { background-color: #E5DDD5 !important; }
+.dark .dark-on .phone-screen .bg-\[\#F0F0F0\] { background-color: #F0F0F0 !important; }
+.dark .dark-on .phone-screen .bg-\[\#DCF8C6\] { background-color: #DCF8C6 !important; color: #0f172a !important; }
+/* Text inside the phone screen: bubble body uses slate-900 (dark), the
+ * meta row (timestamps) uses slate-500 (medium grey). Both stay readable
+ * on the light phone background. */
+.dark .dark-on .phone-screen .text-slate-900 { color: #0f172a !important; }
+.dark .dark-on .phone-screen .text-slate-800 { color: #1e293b !important; }
+.dark .dark-on .phone-screen .text-slate-700 { color: #334155 !important; }
+.dark .dark-on .phone-screen .text-slate-600 { color: #475569 !important; }
+.dark .dark-on .phone-screen .text-slate-500 { color: #64748b !important; }
+.dark .dark-on .phone-screen .text-slate-400 { color: #94a3b8 !important; }

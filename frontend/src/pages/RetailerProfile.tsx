@@ -49,7 +49,7 @@ export default function RetailerProfile() {
         title={r.retailer_name}
         subtitle={`Retailer #${r.id} · ${r.retailer_code}`}
         right={
-          <Link to="/retailers">
+          <Link to="/admin/retailers">
             <SecondaryButton><ArrowLeft className="w-4 h-4" /> All retailers</SecondaryButton>
           </Link>
         }
@@ -140,7 +140,7 @@ export default function RetailerProfile() {
                     <Td>{fmtDate(j.sent_at)}</Td>
                     <Td>{fmtDate(j.delivered_at)}</Td>
                     <Td>{fmtDate(j.read_at)}</Td>
-                    <Td><Link to={`/messages/${j.id}`} className="text-brand-700 hover:underline text-sm">Open →</Link></Td>
+                    <Td><Link to={`/admin/messages/${j.id}`} className="text-brand-700 hover:underline text-sm">Open →</Link></Td>
                   </motion.tr>
                 ))}
               </motion.tbody>

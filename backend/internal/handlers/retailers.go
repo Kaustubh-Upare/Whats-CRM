@@ -8,10 +8,11 @@ import (
 )
 
 func (s *Server) ListRetailers(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	search := r.URL.Query().Get("q")
 	limit := intParam(r, "limit", 50)
 	offset := intParam(r, "offset", 0)
-	items, total, err := s.Store.ListRetailers(r.Context(), search, limit, offset)
+	items, total, err := s.Store.ListRetailers(r.Context(), uid, search, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -22,12 +23,13 @@ func (s *Server) ListRetailers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetRetailer(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	ret, err := s.Store.GetRetailer(r.Context(), id)
+	ret, err := s.Store.GetRetailer(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -36,7 +38,7 @@ func (s *Server) GetRetailer(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
-	history, err := s.Store.RetailerHistory(r.Context(), id, 200)
+	history, err := s.Store.RetailerHistory(r.Context(), uid, id, 200)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -50,6 +52,7 @@ type optOutReq struct {
 }
 
 func (s *Server) SetOptOut(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -60,11 +63,10 @@ func (s *Server) SetOptOut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	if err := s.Store.SetOptOut(r.Context(), id, req.OptOut, req.Reason); err != nil {
+	if err := s.Store.SetOptOut(r.Context(), uid, id, req.OptOut, req.Reason); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	uid := middleware.UserID(r)
 	email := middleware.Email(r)
 	action := "retailer.opt_in"
 	if req.OptOut {

@@ -115,7 +115,10 @@ export default function AuditLogPage() {
             <select
               value={limit}
               onChange={(e) => setLimit(Number(e.target.value))}
-              className="text-sm border border-slate-300 rounded-md px-2 py-1.5"
+              className="text-sm border border-slate-300 dark:border-slate-700
+                         bg-white dark:bg-[var(--input-bg)]
+                         text-slate-900 dark:text-slate-100
+                         rounded-md px-2 py-1.5"
               title="How many recent actions to fetch"
             >
               <option value={50}>Last 50</option>
@@ -126,7 +129,9 @@ export default function AuditLogPage() {
             <button
               onClick={() => audit.refetch()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
-                         border border-slate-300 hover:bg-slate-50 text-sm"
+                         border border-slate-300 dark:border-slate-700
+                         hover:bg-slate-50 dark:hover:bg-white/5
+                         text-slate-700 dark:text-slate-200 text-sm"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Refresh
             </button>
@@ -137,7 +142,7 @@ export default function AuditLogPage() {
       {/* Filter chips + search */}
       <Card hover={false} className="!p-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.08em] font-medium text-slate-500 pr-1">
+          <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.08em] font-medium text-slate-500 dark:text-slate-400 pr-1">
             <Filter className="w-3.5 h-3.5" />
             Filter
           </div>
@@ -154,14 +159,16 @@ export default function AuditLogPage() {
                 transition={{ type: 'spring', stiffness: 500, damping: 26 }}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                   active
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                    : `${b.chipClass} hover:bg-slate-50`
+                    ? 'bg-slate-900 dark:bg-emerald-500/20 text-white dark:text-emerald-100 border-slate-900 dark:border-emerald-400/40 shadow-sm'
+                    : `${b.chipClass} hover:bg-slate-50 dark:hover:bg-white/5`
                 }`}
               >
                 <Icon className="w-3 h-3" />
                 {b.label}
                 <span className={`tabular-nums text-[10px] px-1 rounded-full ${
-                  active ? 'bg-white/15 text-white' : 'bg-white/70 text-slate-600'
+                  active
+                    ? 'bg-white/15 dark:bg-emerald-500/30 text-white dark:text-emerald-100'
+                    : 'bg-white/70 dark:bg-white/5 text-slate-600 dark:text-slate-300'
                 }`}>
                   {n.toLocaleString()}
                 </span>
@@ -170,13 +177,18 @@ export default function AuditLogPage() {
           })}
 
           <div className="ml-auto relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none" />
             <input
               type="text"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search action, actor, entity, metadata…"
-              className="text-sm border border-slate-300 rounded-md pl-7 pr-2.5 py-1.5 w-72 focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+              className="text-sm border border-slate-300 dark:border-slate-700
+                         bg-white dark:bg-[var(--input-bg)]
+                         text-slate-900 dark:text-slate-100
+                         placeholder:text-slate-400 dark:placeholder:text-slate-500
+                         rounded-md pl-7 pr-2.5 py-1.5 w-72
+                         focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
             />
           </div>
         </div>
@@ -189,13 +201,14 @@ export default function AuditLogPage() {
           <div className="p-4"><ErrorBox msg={(audit.error as any)?.response?.data?.error || (audit.error as any)?.message || 'Failed to load audit log'} /></div>
         ) : filtered.length === 0 ? (
           <div className="p-12 text-center">
-            <div className="w-16 h-16 mx-auto rounded-full bg-slate-50 grid place-items-center mb-3 border border-dashed border-slate-200">
-              <Inbox className="w-7 h-7 text-slate-300" />
+            <div className="w-16 h-16 mx-auto rounded-full bg-slate-50 dark:bg-white/5
+                            grid place-items-center mb-3 border border-dashed border-slate-200 dark:border-white/10">
+              <Inbox className="w-7 h-7 text-slate-300 dark:text-slate-600" />
             </div>
-            <div className="text-sm font-medium text-slate-700">
+            <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
               {all.length === 0 ? 'No audit entries yet' : 'No actions match this filter'}
             </div>
-            <div className="text-xs text-slate-400 mt-1 max-w-[420px] mx-auto leading-relaxed">
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-[420px] mx-auto leading-relaxed">
               {all.length === 0
                 ? 'Every admin action — logins, batch approvals, template edits, retailer opt-outs — will appear here as it happens.'
                 : 'Try a different filter or clear the search.'}
@@ -203,14 +216,17 @@ export default function AuditLogPage() {
             {(bucket !== 'all' || q) && (
               <button
                 onClick={() => { setBucket('all'); setQ('') }}
-                className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-slate-300 hover:bg-slate-50 rounded-md text-slate-700"
+                className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs
+                           border border-slate-300 dark:border-slate-700
+                           hover:bg-slate-50 dark:hover:bg-white/5
+                           rounded-md text-slate-700 dark:text-slate-200"
               >
                 Clear filters
               </button>
             )}
           </div>
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-slate-100 dark:divide-white/5">
             <AnimatePresence initial={false}>
               {filtered.map((a, i) => (
                 <LogRow key={a.id} log={a} highlight={i === 0 && !q && bucket === 'all'} />
@@ -232,19 +248,21 @@ function LogRow({ log, highlight }: { log: AuditLog; highlight: boolean }) {
     <motion.li
       layout
       initial={highlight ? { opacity: 0, y: -6, backgroundColor: '#f0f9ff' } : false}
-      animate={{ opacity: 1, y: 0, backgroundColor: '#ffffff' }}
+      animate={{ opacity: 1, y: 0, backgroundColor: 'rgba(255,255,255,0)' }}
       exit={{ opacity: 0, x: -8 }}
       transition={{ duration: 0.25 }}
     >
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex items-start gap-3"
+        className="w-full text-left px-4 py-3
+                   hover:bg-slate-50 dark:hover:bg-white/5
+                   transition-colors flex items-start gap-3"
       >
         <div className="mt-0.5">
           {open ? (
-            <ChevronDown className="w-4 h-4 text-slate-400" />
+            <ChevronDown className="w-4 h-4 text-slate-400 dark:text-slate-500" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-slate-400" />
+            <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-500" />
           )}
         </div>
         <div className="shrink-0 mt-0.5">
@@ -255,21 +273,23 @@ function LogRow({ log, highlight }: { log: AuditLog; highlight: boolean }) {
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-sm text-slate-800 truncate">{summary}</div>
+            <div className="text-sm text-slate-800 dark:text-slate-100 truncate">{summary}</div>
             <div className="flex items-center gap-2 shrink-0">
               {log.entity_type && (
-                <span className="text-[10px] font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-1.5">
+                <span className="text-[10px] font-medium text-slate-600 dark:text-slate-300
+                                 bg-slate-50 dark:bg-white/5
+                                 border border-slate-200 dark:border-white/10 rounded-full px-1.5">
                   {log.entity_type}#{log.entity_id ?? '—'}
                 </span>
               )}
-              <span className="text-[11px] text-slate-400 tabular-nums">
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
                 {fmtRelative(log.created_at)}
               </span>
             </div>
           </div>
-          <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
             by <span className="font-mono">{log.actor_email || 'system'}</span>
-            {log.ip_address && <span className="text-slate-400"> · {log.ip_address}</span>}
+            {log.ip_address && <span className="text-slate-400 dark:text-slate-500"> · {log.ip_address}</span>}
           </div>
         </div>
       </button>
@@ -285,23 +305,23 @@ function LogRow({ log, highlight }: { log: AuditLog; highlight: boolean }) {
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 pl-11 space-y-2">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-slate-500">
-                <div><span className="text-slate-400">When:</span> {fmtDate(log.created_at)}</div>
-                <div><span className="text-slate-400">Actor:</span> <span className="font-mono">{log.actor_email || 'system'}</span></div>
-                {log.actor_id != null && <div><span className="text-slate-400">Actor ID:</span> <span className="font-mono">#{log.actor_id}</span></div>}
-                {log.ip_address && <div><span className="text-slate-400">IP:</span> <span className="font-mono">{log.ip_address}</span></div>}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <div><span className="text-slate-400 dark:text-slate-500">When:</span> {fmtDate(log.created_at)}</div>
+                <div><span className="text-slate-400 dark:text-slate-500">Actor:</span> <span className="font-mono">{log.actor_email || 'system'}</span></div>
+                {log.actor_id != null && <div><span className="text-slate-400 dark:text-slate-500">Actor ID:</span> <span className="font-mono">#{log.actor_id}</span></div>}
+                {log.ip_address && <div><span className="text-slate-400 dark:text-slate-500">IP:</span> <span className="font-mono">{log.ip_address}</span></div>}
                 {log.user_agent && (
-                  <div className="truncate"><span className="text-slate-400">UA:</span> {log.user_agent}</div>
+                  <div className="truncate"><span className="text-slate-400 dark:text-slate-500">UA:</span> {log.user_agent}</div>
                 )}
                 {log.entity_type && (
                   <div>
-                    <span className="text-slate-400">Entity:</span>{' '}
+                    <span className="text-slate-400 dark:text-slate-500">Entity:</span>{' '}
                     <span className="font-mono">{log.entity_type}#{log.entity_id ?? '—'}</span>
                   </div>
                 )}
               </div>
               {log.metadata && (
-                <pre className="text-[11px] leading-relaxed bg-slate-900 text-slate-100 rounded-md p-3 overflow-x-auto max-h-96">
+                <pre className="text-[11px] leading-relaxed bg-slate-900 dark:bg-black/40 text-slate-100 rounded-md p-3 overflow-x-auto max-h-96 border border-white/5">
 {JSON.stringify(log.metadata, null, 2)}
                 </pre>
               )}

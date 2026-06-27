@@ -3,7 +3,10 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/whatsyitc/backend/internal/middleware"
 )
 
 // Healthz reports the overall liveness of the service. It pings Postgres and
@@ -29,7 +32,8 @@ func (s *Server) Healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) DashboardKPI(w http.ResponseWriter, r *http.Request) {
-	k, err := s.Store.KPIs(r.Context())
+	uid := middleware.UserID(r)
+	k, err := s.Store.KPIs(r.Context(), uid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -42,7 +46,8 @@ func (s *Server) DashboardTrend(w http.ResponseWriter, r *http.Request) {
 	if days < 1 || days > 60 {
 		days = 7
 	}
-	pts, err := s.Store.DailyTrend(r.Context(), days)
+	uid := middleware.UserID(r)
+	pts, err := s.Store.DailyTrend(r.Context(), uid, days)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -52,7 +57,15 @@ func (s *Server) DashboardTrend(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) RecentActivity(w http.ResponseWriter, r *http.Request) {
 	limit := intParam(r, "limit", 20)
-	logs, err := s.Store.RecentAudit(r.Context(), limit)
+	uid := middleware.UserID(r)
+	entityType := r.URL.Query().Get("entity_type")
+	var entityID int64
+	if v := r.URL.Query().Get("entity_id"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			entityID = n
+		}
+	}
+	logs, err := s.Store.RecentAudit(r.Context(), uid, limit, entityType, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

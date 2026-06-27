@@ -167,7 +167,7 @@ export default function Reports() {
               whileTap={{ scale: 0.97 }}
               transition={{ type: 'spring', stiffness: 400, damping: 22 }}
               href={`/api/reports/export.csv?from=${from}&to=${to}`}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-200 text-sm font-medium"
             >
               <Download className="w-3.5 h-3.5" /> Export CSV
             </motion.a>
@@ -185,15 +185,17 @@ export default function Reports() {
       />
 
       {/* Date window card — sticky on scroll */}
-      <div className="sticky top-0 z-20 -mx-6 lg:-mx-10 px-6 lg:px-10 pt-1 pb-4 bg-white/80 backdrop-blur-md border-b border-slate-200/70 mb-6">
-        <Card hover={false} className="!border-slate-200/70">
+      <div className="sticky top-0 z-20 -mx-6 lg:-mx-10 px-6 lg:px-10 pt-1 pb-4
+                      bg-white/80 dark:bg-[#020617]/85
+                      backdrop-blur-md border-b border-slate-200/70 dark:border-white/5 mb-6">
+        <Card hover={false} className="!border-slate-200/70 dark:!border-white/10">
           <div className="p-4 lg:p-5 flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.08em] font-medium text-slate-500">
-                <Sparkles className="w-3.5 h-3.5 text-brand-500" />
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.08em] font-medium text-slate-500 dark:text-slate-400">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
                 Date window
               </div>
-              <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
                 <span className="hidden sm:inline">Updates automatically</span>
                 <span className="sm:hidden">Auto-updates</span>
               </div>
@@ -207,28 +209,36 @@ export default function Reports() {
 
             <div className="flex items-center gap-3 flex-wrap text-sm">
               <div className="flex items-center gap-2">
-                <label className="text-slate-600">From</label>
+                <label className="text-slate-600 dark:text-slate-300">From</label>
                 <input
                   type="date"
                   value={from}
                   onChange={(e) => setFrom(e.target.value)}
-                  className="border border-slate-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+                  className="border border-slate-300 dark:border-slate-700
+                             bg-white dark:bg-[var(--input-bg)]
+                             text-slate-900 dark:text-slate-100
+                             rounded-md px-2.5 py-1.5 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
                 />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-slate-600">To</label>
+                <label className="text-slate-600 dark:text-slate-300">To</label>
                 <input
                   type="date"
                   value={to}
                   onChange={(e) => setTo(e.target.value)}
-                  className="border border-slate-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+                  className="border border-slate-300 dark:border-slate-700
+                             bg-white dark:bg-[var(--input-bg)]
+                             text-slate-900 dark:text-slate-100
+                             rounded-md px-2.5 py-1.5 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
                 />
               </div>
-              <div className="ml-auto text-slate-700 text-sm">
-                <span className="text-slate-400 mr-1.5">·</span>
+              <div className="ml-auto text-slate-700 dark:text-slate-200 text-sm">
+                <span className="text-slate-400 dark:text-slate-500 mr-1.5">·</span>
                 {fmtRange(from, to)}
-                <span className="text-slate-400 ml-1.5">·</span>{' '}
-                <span className="text-slate-500">{days} {days === 1 ? 'day' : 'days'}</span>
+                <span className="text-slate-400 dark:text-slate-500 ml-1.5">·</span>{' '}
+                <span className="text-slate-500 dark:text-slate-400">{days} {days === 1 ? 'day' : 'days'}</span>
               </div>
             </div>
           </div>
@@ -446,7 +456,7 @@ export default function Reports() {
                     key={k}
                     whileHover={{ y: -2 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 22 }}
-                    className="bg-white border border-slate-200/70 rounded-lg p-3 hover:shadow-sm transition-shadow"
+                    className="admin-card rounded-lg p-3 hover:shadow-sm dark:hover:shadow-[0_8px_24px_-12px_rgba(16,185,129,0.25)] transition-shadow"
                   >
                     <div className="flex items-center gap-1.5 text-[11px] text-slate-500 capitalize">
                       <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: c }} />
@@ -555,8 +565,8 @@ function PresetChip({ label, active, onClick }: { label: string; active: boolean
       transition={{ type: 'spring', stiffness: 500, damping: 26 }}
       className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors duration-200 ${
         active
-          ? 'bg-slate-900 text-white shadow-sm'
-          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          ? 'bg-slate-900 dark:bg-emerald-500 text-white dark:text-emerald-950 shadow-sm'
+          : 'bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
       }`}
     >
       {label}
@@ -608,7 +618,7 @@ function KpiTile({
       variants={itemFadeUp}
       whileHover={{ y: -2 }}
       transition={{ type: 'spring', stiffness: 320, damping: 22 }}
-      className={`bg-white border border-slate-200/70 rounded-xl shadow-[0_1px_2px_rgba(15,23,42,0.04)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.06)] p-4 lg:p-5 transition-shadow`}
+      className={`admin-card rounded-xl shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:shadow-[0_18px_40px_-20px_rgba(0,0,0,0.6)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.06)] dark:hover:shadow-[0_24px_50px_-16px_rgba(16,185,129,0.20)] p-4 lg:p-5 transition-shadow`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">

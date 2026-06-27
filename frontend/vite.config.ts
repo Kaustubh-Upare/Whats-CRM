@@ -28,6 +28,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/webhook': {
+        target: 'http://localhost:8082',
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
 })

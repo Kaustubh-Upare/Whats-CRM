@@ -1,7 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
+    screens: {
+      xs: '480px',
+      // defaults: sm 640, md 768, lg 1024, xl 1280, 2xl 1536
+    },
     extend: {
       colors: {
         brand: {
@@ -15,6 +20,11 @@ export default {
           700: '#15673a',
           800: '#135230',
           900: '#0f4328',
+        },
+        ink: {
+          DEFAULT: '#0f172a',
+          muted:   '#475569',
+          subtle:  '#64748b',
         },
       },
       fontFamily: {

@@ -12,7 +12,8 @@ import (
 )
 
 func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
-	ts, err := s.Store.ListTemplates(r.Context())
+	uid := middleware.UserID(r)
+	ts, err := s.Store.ListTemplates(r.Context(), uid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -29,6 +30,7 @@ type createTemplateReq struct {
 }
 
 func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	var req createTemplateReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad json")
@@ -41,8 +43,9 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "name and body required")
 		return
 	}
+	owner := uid
 	t := &models.Template{
-		Name: req.Name, LanguageCode: req.LanguageCode, Category: req.Category,
+		AdminUserID: &owner, Name: req.Name, LanguageCode: req.LanguageCode, Category: req.Category,
 		Body: req.Body, VariableCount: countVars(req.Body),
 		SamplePayload: req.Sample, IsActive: true,
 	}
@@ -57,7 +60,6 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	uid := middleware.UserID(r)
 	email := middleware.Email(r)
 	audit.Log(r.Context(), s.Store.DB, audit.Entry{
 		ActorID: &uid, ActorEmail: &email,
@@ -70,12 +72,13 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 // GetTemplate returns one template row by id. Used by the editor to hydrate
 // the form before letting the user edit / preview it.
 func (s *Server) GetTemplate(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	t, err := s.Store.GetTemplateByID(r.Context(), id)
+	t, err := s.Store.GetTemplateByID(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -100,12 +103,13 @@ type updateTemplateReq struct {
 // variable_count is re-derived from the new body text so the cached count
 // never drifts from what the worker / preview path will count.
 func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	existing, err := s.Store.GetTemplateByID(r.Context(), id)
+	existing, err := s.Store.GetTemplateByID(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -136,8 +140,10 @@ func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	if req.IsActive != nil {
 		isActive = *req.IsActive
 	}
+	owner := uid
 	updated := &models.Template{
 		ID:            existing.ID,
+		AdminUserID:   &owner,
 		Name:          req.Name,
 		LanguageCode:  req.LanguageCode,
 		Category:      req.Category,
@@ -154,14 +160,13 @@ func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	uid := middleware.UserID(r)
 	email := middleware.Email(r)
 	audit.Log(r.Context(), s.Store.DB, audit.Entry{
 		ActorID: &uid, ActorEmail: &email,
 		Action: "template.updated", EntityType: strPtr("template"), EntityID: &id,
 		Metadata: map[string]any{"name": req.Name, "lang": req.LanguageCode, "is_active": isActive},
 	})
-	fresh, err := s.Store.GetTemplateByID(r.Context(), id)
+	fresh, err := s.Store.GetTemplateByID(r.Context(), uid, id)
 	if err != nil || fresh == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
@@ -172,6 +177,7 @@ func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
 // SetTemplateActive is a thin wrapper around PATCH /templates/{id}/active
 // so the UI doesn't have to send a full PUT body just to flip the toggle.
 func (s *Server) SetTemplateActive(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -184,11 +190,10 @@ func (s *Server) SetTemplateActive(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	if err := s.Store.SetTemplateActive(r.Context(), id, req.IsActive); err != nil {
+	if err := s.Store.SetTemplateActive(r.Context(), uid, id, req.IsActive); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	uid := middleware.UserID(r)
 	email := middleware.Email(r)
 	audit.Log(r.Context(), s.Store.DB, audit.Entry{
 		ActorID: &uid, ActorEmail: &email,
@@ -199,12 +204,13 @@ func (s *Server) SetTemplateActive(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	existing, err := s.Store.GetTemplateByID(r.Context(), id)
+	existing, err := s.Store.GetTemplateByID(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -213,11 +219,10 @@ func (s *Server) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "template not found")
 		return
 	}
-	if err := s.Store.DeleteTemplate(r.Context(), id); err != nil {
+	if err := s.Store.DeleteTemplate(r.Context(), uid, id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	uid := middleware.UserID(r)
 	email := middleware.Email(r)
 	audit.Log(r.Context(), s.Store.DB, audit.Entry{
 		ActorID: &uid, ActorEmail: &email,

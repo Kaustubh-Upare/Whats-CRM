@@ -11,8 +11,26 @@
     <meta property="og:description" content="Admin console for billing WhatsApp campaigns and retailer communications." />
     <meta property="og:type" content="website" />
     <title>WhatsyITC — Admin</title>
+    <script>
+      // FOUC-free theme init — runs synchronously before React mounts.
+      // Reads the user's saved choice (localStorage), falls back to the OS
+      // preference, then tags <html> with .dark so the page paints in the
+      // correct theme on the very first frame.
+      (function () {
+        try {
+          var KEY = 'whatsyitc_theme';
+          var stored = null;
+          try { stored = window.localStorage.getItem(KEY); } catch (e) { /* private mode */ }
+          var t = (stored === 'light' || stored === 'dark')
+            ? stored
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          if (t === 'dark') document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = t;
+        } catch (e) { /* never block the bundle on this */ }
+      })();
+    </script>
   </head>
-  <body class="bg-slate-50 text-slate-900">
+  <body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 transition-colors">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

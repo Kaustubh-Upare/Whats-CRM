@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { ErrorBox, PageHeader, Spinner } from '@/components/ui'
+import { FollowUpMenuItem } from '@/components/FollowUpMenuItem'
+import { listLeads } from '@/lib/crm'
 import { fmtRelative } from '@/lib/format'
 
 type Conversation = {
@@ -74,6 +76,13 @@ export default function Chats() {
     }
   }, [convs.data, activeKey])
 
+  // Back-to-list shortcut fired by the mobile thread header.
+  useEffect(() => {
+    const onBack = () => setActiveKey(null)
+    window.addEventListener('whatsyitc:chats:back', onBack as EventListener)
+    return () => window.removeEventListener('whatsyitc:chats:back', onBack as EventListener)
+  }, [])
+
   // Thread query — uses retailer_id when available, otherwise falls back to
   // a dedicated endpoint for unlinked-phone messages (added below).
   const thread = useQuery({
@@ -122,7 +131,8 @@ export default function Chats() {
   }
 
   return (
-    <div className="-mx-6 lg:-mx-8 -mt-6 lg:-mt-8 h-[calc(100vh-64px)] flex flex-col bg-slate-50">
+    <div className="-mx-6 lg:-mx-8 -mt-6 lg:-mt-8 h-[calc(100vh-64px)] flex flex-col
+                    bg-slate-50 dark:bg-[#020617] transition-colors">
       <PageHeader
         title="Chats"
         subtitle={`${convs.data?.total ?? 0} conversation${(convs.data?.total ?? 0) === 1 ? '' : 's'} · ${failedCount > 0 ? `${failedCount} with failures` : 'all clear'}`}
@@ -131,7 +141,9 @@ export default function Chats() {
             <button
               onClick={() => convs.refetch()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
-                         border border-slate-300 hover:bg-slate-50 text-sm"
+                         border border-slate-300 dark:border-slate-700
+                         hover:bg-slate-50 dark:hover:bg-white/5
+                         text-slate-700 dark:text-slate-200 text-sm"
               title="Refresh conversations"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Refresh
@@ -170,23 +182,23 @@ export default function Chats() {
               exit={{ opacity: 0, y: 8, scale: 0.97 }}
               transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden"
+              className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 w-full max-w-md overflow-hidden"
             >
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="px-5 py-4 border-b border-slate-100 dark:border-white/10 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <FlaskConical className="w-4 h-4 text-emerald-600" />
-                  <div className="font-semibold">Simulate inbound message</div>
+                  <FlaskConical className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <div className="font-semibold text-slate-900 dark:text-white">Simulate inbound message</div>
                 </div>
                 <button
                   onClick={() => setSimOpen(false)}
                   disabled={simBusy}
-                  className="p-1 rounded hover:bg-slate-100 text-slate-500"
+                  className="p-1 rounded hover:bg-slate-100 dark:hover:bg-white/5 text-slate-500 dark:text-slate-400"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
               <div className="p-5 space-y-3">
-                <div className="text-xs text-slate-500 -mt-1 mb-2">
+                <div className="text-xs text-slate-500 dark:text-slate-400 -mt-1 mb-2">
                   Posts to <span className="font-mono">/api/dev/simulate-inbound</span> using
                   the same code path as the Meta webhook — useful when ngrok isn't reachable.
                 </div>
@@ -195,8 +207,14 @@ export default function Chats() {
                     value={simPhone}
                     onChange={(e) => setSimPhone(e.target.value)}
                     placeholder="919168810152"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg
-                               focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                    className="w-full px-3 py-2 text-sm
+                               bg-white dark:bg-[var(--input-bg)]
+                               border border-slate-200 dark:border-[var(--input-border)]
+                               text-slate-900 dark:text-slate-100
+                               placeholder:text-slate-400 dark:placeholder:text-slate-500
+                               rounded-lg
+                               focus:outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-500/40
+                               focus:border-emerald-400 dark:focus:border-emerald-500/60"
                   />
                 </Field>
                 <Field label="Message body">
@@ -205,8 +223,14 @@ export default function Chats() {
                     onChange={(e) => setSimBody(e.target.value)}
                     rows={3}
                     placeholder="Type the inbound message text…"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg
-                               focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                    className="w-full px-3 py-2 text-sm
+                               bg-white dark:bg-[var(--input-bg)]
+                               border border-slate-200 dark:border-[var(--input-border)]
+                               text-slate-900 dark:text-slate-100
+                               placeholder:text-slate-400 dark:placeholder:text-slate-500
+                               rounded-lg
+                               focus:outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-500/40
+                               focus:border-emerald-400 dark:focus:border-emerald-500/60"
                   />
                 </Field>
                 <Field label="Display name (optional)">
@@ -214,21 +238,30 @@ export default function Chats() {
                     value={simName}
                     onChange={(e) => setSimName(e.target.value)}
                     placeholder="Retailer name (upgrades '(unknown)' placeholder)"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg
-                               focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                    className="w-full px-3 py-2 text-sm
+                               bg-white dark:bg-[var(--input-bg)]
+                               border border-slate-200 dark:border-[var(--input-border)]
+                               text-slate-900 dark:text-slate-100
+                               placeholder:text-slate-400 dark:placeholder:text-slate-500
+                               rounded-lg
+                               focus:outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-500/40
+                               focus:border-emerald-400 dark:focus:border-emerald-500/60"
                   />
                 </Field>
                 {simError && (
-                  <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-2.5 py-1.5">
+                  <div className="text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 rounded-md px-2.5 py-1.5">
                     {simError}
                   </div>
                 )}
               </div>
-              <div className="px-5 py-4 border-t border-slate-100 bg-slate-50/60 flex items-center justify-end gap-2">
+              <div className="px-5 py-4 border-t border-slate-100 dark:border-white/10
+                              bg-slate-50/60 dark:bg-white/5
+                              flex items-center justify-end gap-2">
                 <button
                   onClick={() => setSimOpen(false)}
                   disabled={simBusy}
-                  className="px-3 py-1.5 rounded-md text-sm text-slate-700 hover:bg-slate-100"
+                  className="px-3 py-1.5 rounded-md text-sm text-slate-700 dark:text-slate-200
+                             hover:bg-slate-100 dark:hover:bg-white/5"
                 >
                   Cancel
                 </button>
@@ -248,21 +281,31 @@ export default function Chats() {
         )}
       </AnimatePresence>
 
-      <div className="flex-1 px-6 lg:px-8 pb-6 lg:pb-8 min-h-0">
-        <div className="grid grid-cols-1 md:grid-cols-[360px_1fr] gap-4 h-full">
-          {/* LEFT: conversation list */}
-          <aside className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden min-h-0">
+      <div className="flex-1 px-3 sm:px-6 lg:px-8 pb-3 sm:pb-6 lg:pb-8 min-h-0">
+        <div className="grid grid-cols-1 md:grid-cols-[360px_1fr] gap-3 md:gap-4 h-full">
+          {/* LEFT: conversation list — on phones, hidden when a thread is open
+              so the user gets a full-bleed chat surface and taps "Back" to
+              return to the list. */}
+          <aside className={`admin-card rounded-2xl flex flex-col overflow-hidden min-h-0 ${activeKey ? 'hidden md:flex' : 'flex'}`}>
             {/* Search header */}
-            <div className="p-4 border-b border-slate-100 bg-gradient-to-b from-slate-50 to-white">
+            <div className="p-4 border-b border-slate-100 dark:border-white/5
+                            bg-gradient-to-b from-slate-50 to-white
+                            dark:from-white/[0.03] dark:to-transparent">
               <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Search retailer or phone…"
-                  className="w-full pl-9 pr-3 py-2.5 text-sm bg-white border border-slate-200 rounded-xl
-                             placeholder:text-slate-400 text-slate-800
-                             focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400
+                  className="w-full pl-9 pr-3 py-2.5 text-sm
+                             bg-white dark:bg-[var(--input-bg)]
+                             border border-slate-200 dark:border-[var(--input-border)]
+                             placeholder:text-slate-400 dark:placeholder:text-slate-500
+                             text-slate-800 dark:text-slate-100
+                             rounded-xl
+                             focus:outline-none focus:ring-2
+                             focus:ring-brand-200 dark:focus:ring-emerald-500/40
+                             focus:border-brand-400 dark:focus:border-emerald-500/60
                              transition-shadow"
                 />
               </div>
@@ -292,8 +335,8 @@ export default function Chats() {
             </div>
           </aside>
 
-          {/* RIGHT: thread */}
-          <section className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden min-h-0">
+          {/* RIGHT: thread — hidden on phones until a conversation is picked. */}
+          <section className={`admin-card rounded-2xl flex flex-col overflow-hidden min-h-0 ${activeKey ? 'flex' : 'hidden md:flex'}`}>
             {!active ? (
               <EmptyThread />
             ) : (
@@ -330,9 +373,12 @@ function ConversationRow({
       exit={{ opacity: 0, x: -8 }}
       transition={{ delay: Math.min(index * 0.02, 0.2), duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
       onClick={onClick}
-      className={`relative w-full text-left px-4 py-3.5 flex items-start gap-3 border-b border-slate-100
+      className={`relative w-full text-left px-4 py-3.5 flex items-start gap-3
+                  border-b border-slate-100 dark:border-white/5
                   transition-colors duration-150
-                  ${isActive ? 'bg-brand-50/60' : 'hover:bg-slate-50'}`}
+                  ${isActive
+                    ? 'bg-emerald-50/60 dark:bg-emerald-500/15'
+                    : 'hover:bg-slate-50 dark:hover:bg-white/5'}`}
     >
       {isActive && (
         <motion.span
@@ -344,10 +390,13 @@ function ConversationRow({
       <Avatar name={c.retailer_name} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-medium text-sm text-slate-900 truncate flex items-center gap-1.5">
+          <span className="font-medium text-sm text-slate-900 dark:text-white truncate flex items-center gap-1.5">
             {c.retailer_name}
             <span className="inline-flex items-center text-[9px] font-semibold uppercase tracking-wide
-                             text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 py-px rounded shrink-0">
+                             text-emerald-700 dark:text-emerald-300
+                             bg-emerald-50 dark:bg-emerald-500/20
+                             border border-emerald-200 dark:border-emerald-400/30
+                             px-1 py-px rounded shrink-0">
               WA
             </span>
           </span>
@@ -356,18 +405,18 @@ function ConversationRow({
           </span>
         </div>
         <div className="flex items-center gap-1 mt-0.5">
-          <Phone className="w-3 h-3 text-slate-400" />
-          <span className="text-[11px] text-slate-500 font-mono truncate">{c.phone}</span>
+          <Phone className="w-3 h-3 text-slate-400 dark:text-slate-500" />
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate">{c.phone}</span>
         </div>
         <div className="mt-1 flex items-center gap-1.5">
           <StatusDot status={c.last_status} failed={c.has_failed} direction={c.last_direction} />
-          <span className="text-xs text-slate-600 truncate flex-1">
-            {c.last_preview || <span className="text-slate-400 italic">No messages yet</span>}
+          <span className="text-xs text-slate-600 dark:text-slate-300 truncate flex-1">
+            {c.last_preview || <span className="text-slate-400 dark:text-slate-500 italic">No messages yet</span>}
           </span>
         </div>
       </div>
       {c.message_count > 0 && (
-        <span className="ml-1 bg-slate-100 text-slate-600 text-[10px] font-semibold
+        <span className="ml-1 bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 text-[10px] font-semibold
                          rounded-full px-2 py-0.5 shrink-0 tabular-nums">
           {c.message_count}
         </span>
@@ -379,30 +428,68 @@ function ConversationRow({
 /* ---------------- Thread (right pane) ---------------- */
 
 function ThreadHeader({ active }: { active: Conversation }) {
+  // Look up the lead for this phone so we can offer "Follow up" in
+  // the chat header. Cheap: a single list call per active chat.
+  // The FollowUpMenuItem stays disabled if no lead exists for the
+  // phone (orphan inbound messages).
+  const leadQuery = useQuery({
+    queryKey: ['crm', 'leads', 'lookup', active.phone],
+    queryFn: async () => {
+      const res = await listLeads({ search: active.phone, limit: 1 })
+      return res.items?.[0] || null
+    },
+    staleTime: 60_000,
+  })
+  const lead = leadQuery.data
+  // We use a custom event to ask the parent Chats component to clear its
+  // activeKey on phones. We can't import useState here (different scope),
+  // so we dispatch through window — minimal, scoped to this thread header.
+  function backToList() {
+    try { window.dispatchEvent(new CustomEvent('whatsyitc:chats:back')) } catch { /* noop */ }
+  }
   return (
-    <header className="px-5 py-3.5 border-b border-slate-100 bg-white flex items-center gap-3 shrink-0">
+    <header className="px-5 py-3.5 border-b border-slate-100 dark:border-white/10 bg-white dark:bg-[#0f1a2f] flex items-center gap-3 shrink-0">
+      <button
+        type="button"
+        onClick={backToList}
+        aria-label="Back to conversations"
+        className="md:hidden -ml-2 p-2 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5"
+      >
+        <ArrowRight className="w-4 h-4 rotate-180" />
+      </button>
       <Avatar name={active.retailer_name} />
       <div className="flex-1 min-w-0">
-        <div className="font-semibold text-slate-900 truncate flex items-center gap-2">
+        <div className="font-semibold text-slate-900 dark:text-white truncate flex items-center gap-2">
           {active.retailer_name}
           <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide
-                           text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                           text-emerald-700 dark:text-emerald-300
+                           bg-emerald-50 dark:bg-emerald-500/20
+                           border border-emerald-200 dark:border-emerald-400/30
+                           px-1.5 py-0.5 rounded">
             via WhatsApp
           </span>
         </div>
         <div className="flex items-center gap-1 mt-0.5">
-          <Phone className="w-3 h-3 text-slate-400" />
-          <span className="text-xs text-slate-500 font-mono truncate">{active.phone}</span>
+          <Phone className="w-3 h-3 text-slate-400 dark:text-slate-500" />
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">{active.phone}</span>
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        {lead && (
+          <FollowUpMenuItem
+            lead={{ id: lead.id, name: lead.name || active.retailer_name, phone: active.phone }}
+            variant="button"
+          />
+        )}
         {active.has_failed && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-700
-                           bg-rose-50 border border-rose-200 px-2 py-1 rounded-full">
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-700 dark:text-rose-300
+                           bg-rose-50 dark:bg-rose-500/20
+                           border border-rose-200 dark:border-rose-400/30
+                           px-2 py-1 rounded-full">
             <AlertTriangle className="w-3 h-3" /> failed
           </span>
         )}
-        <span className="text-[11px] text-slate-500 tabular-nums">
+        <span className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
           {active.message_count} message{active.message_count === 1 ? '' : 's'}
         </span>
       </div>
@@ -434,13 +521,10 @@ function ThreadPane({
   return (
     <div
       ref={scrollRef}
-      className="flex-1 overflow-y-auto min-h-0 px-6 py-6 space-y-3"
-      style={{
-        backgroundColor: '#f0f2f5',
-        backgroundImage:
-          'radial-gradient(circle at 20px 20px, rgba(255,255,255,0.7) 1px, transparent 1.5px)',
-        backgroundSize: '32px 32px',
-      }}
+      // The chat background is themed via a class so the safety net
+      // can recolour it in dark mode. Inline styles can't be touched
+      // by CSS, which is what caused the previous "stuck white" bug.
+      className="chat-thread-bg flex-1 overflow-y-auto min-h-0 px-6 py-6 space-y-3"
     >
       {items.length === 0 ? (
         <div className="h-full grid place-items-center">
@@ -484,8 +568,9 @@ function Bubble({ m, showDate }: { m: ThreadMessage; showDate: boolean }) {
     <>
       {showDate && (
         <div className="flex justify-center my-2">
-          <span className="text-[11px] text-slate-600 bg-white/80 backdrop-blur-sm
-                           border border-slate-200 rounded-full px-3 py-1 shadow-sm">
+          <span className="text-[11px] text-slate-600 dark:text-slate-200 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm
+                           border border-slate-200 dark:border-white/10
+                           rounded-full px-3 py-1 shadow-sm">
             {dayLabel(m.occurred_at)}
           </span>
         </div>
@@ -501,19 +586,19 @@ function Bubble({ m, showDate }: { m: ThreadMessage; showDate: boolean }) {
         <div
           className={`relative max-w-[72%] min-w-[80px] rounded-2xl px-3.5 py-2 shadow-sm
                       ${isFailed
-                        ? 'bg-rose-50 text-slate-900 rounded-br-md border-2 border-rose-300'
+                        ? 'bg-rose-50 dark:bg-rose-500/20 text-slate-900 dark:text-rose-100 rounded-br-md border-2 border-rose-300 dark:border-rose-500/60'
                         : isOut
-                          ? 'bg-[#d9fdd3] text-slate-900 rounded-br-md'
-                          : 'bg-white text-slate-900 rounded-bl-md border border-slate-100'
+                          ? 'bg-[#d9fdd3] dark:bg-[#1f4d3a] text-slate-900 dark:text-emerald-50 rounded-br-md'
+                          : 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-bl-md border border-slate-100 dark:border-white/10'
                       }`}
         >
           {/* Direction pill — ITC ↔ WhatsApp ↔ Retailer */}
-          <div className={`flex items-center gap-1 mb-1 text-[10px] font-medium ${isOut ? 'text-emerald-700' : 'text-sky-700'}`}>
+          <div className={`flex items-center gap-1 mb-1 text-[10px] font-medium ${isOut ? 'text-emerald-700 dark:text-emerald-300' : 'text-sky-700 dark:text-sky-300'}`}>
             {isOut ? (
               <>
                 <span>ITC</span>
                 <ArrowRight className="w-3 h-3" />
-                <span className="px-1 rounded bg-emerald-100/60">WhatsApp</span>
+                <span className="px-1 rounded bg-emerald-100/60 dark:bg-emerald-500/30">WhatsApp</span>
                 <ArrowRight className="w-3 h-3" />
                 <span>Retailer</span>
               </>
@@ -521,7 +606,7 @@ function Bubble({ m, showDate }: { m: ThreadMessage; showDate: boolean }) {
               <>
                 <span>Retailer</span>
                 <ArrowRight className="w-3 h-3" />
-                <span className="px-1 rounded bg-sky-100/60">WhatsApp</span>
+                <span className="px-1 rounded bg-sky-100/60 dark:bg-sky-500/30">WhatsApp</span>
                 <ArrowRight className="w-3 h-3" />
                 <span>ITC</span>
               </>
@@ -530,12 +615,12 @@ function Bubble({ m, showDate }: { m: ThreadMessage; showDate: boolean }) {
 
           {/* Body */}
           <div className="text-[14px] leading-relaxed whitespace-pre-wrap break-words">
-            {m.body || <span className="text-slate-400 italic">—</span>}
+            {m.body || <span className="text-slate-400 dark:text-slate-500 italic">—</span>}
           </div>
 
           {/* Meta row: time + ticks */}
           <div className="flex items-center justify-end gap-1 mt-1 -mb-0.5">
-            <span className="text-[10px] text-slate-500 tabular-nums">
+            <span className="text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
               {fmtTime(m.occurred_at)}
             </span>
             {isOut && <StatusTicks status={m.status} />}
@@ -545,16 +630,18 @@ function Bubble({ m, showDate }: { m: ThreadMessage; showDate: boolean }) {
           {shortErr && (
             <button
               onClick={() => setShowFullErr((v) => !v)}
-              className="mt-1.5 w-full text-left text-[11px] text-rose-700 bg-rose-50
-                         border border-rose-200 rounded-lg px-2 py-1.5
-                         flex items-start gap-1.5 hover:bg-rose-100 transition-colors"
+              className="mt-1.5 w-full text-left text-[11px] text-rose-700 dark:text-rose-200
+                         bg-rose-50 dark:bg-rose-500/15
+                         border border-rose-200 dark:border-rose-500/30
+                         rounded-lg px-2 py-1.5
+                         flex items-start gap-1.5 hover:bg-rose-100 dark:hover:bg-rose-500/25 transition-colors"
             >
               <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
               <span className="break-words">
                 {showFullErr ? m.last_error : shortErr}
               </span>
               {m.last_error && m.last_error.length > shortErr.length && (
-                <span className="ml-auto text-[10px] text-rose-500 shrink-0">
+                <span className="ml-auto text-[10px] text-rose-500 dark:text-rose-300 shrink-0">
                   {showFullErr ? 'less' : 'more'}
                 </span>
               )}
@@ -619,19 +706,19 @@ function fmtTime(iso: string): string {
 
 function StatusTicks({ status }: { status: string }) {
   if (status === 'failed') {
-    return <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+    return <AlertTriangle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-300" />
   }
   if (status === 'read') {
-    return <CheckCheck className="w-3.5 h-3.5 text-sky-600" />
+    return <CheckCheck className="w-3.5 h-3.5 text-sky-600 dark:text-sky-300" />
   }
   if (status === 'delivered') {
-    return <CheckCheck className="w-3.5 h-3.5 text-slate-500" />
+    return <CheckCheck className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
   }
   if (status === 'sent') {
-    return <Check className="w-3.5 h-3.5 text-slate-500" />
+    return <Check className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
   }
   if (status === 'sending' || status === 'queued') {
-    return <Clock className="w-3.5 h-3.5 text-slate-400 animate-pulse" />
+    return <Clock className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 animate-pulse" />
   }
   return null
 }
@@ -689,13 +776,13 @@ function EmptyConversations({ hasQuery }: { hasQuery: boolean }) {
   return (
     <div className="h-full grid place-items-center px-6">
       <div className="text-center py-12">
-        <div className="w-16 h-16 mx-auto rounded-full bg-slate-50 grid place-items-center mb-3">
-          <Inbox className="w-7 h-7 text-slate-300" />
+        <div className="w-16 h-16 mx-auto rounded-full bg-slate-50 dark:bg-white/5 grid place-items-center mb-3">
+          <Inbox className="w-7 h-7 text-slate-300 dark:text-slate-600" />
         </div>
-        <div className="text-sm font-medium text-slate-700">
+        <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
           {hasQuery ? 'No matches' : 'No conversations yet'}
         </div>
-        <div className="text-xs text-slate-400 mt-1 max-w-[240px] mx-auto leading-relaxed">
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-[240px] mx-auto leading-relaxed">
           {hasQuery
             ? 'Try a different name or phone number.'
             : 'Approve a batch in /batches — sent messages will appear here as chat threads.'}
@@ -709,12 +796,14 @@ function EmptyThread() {
   return (
     <div className="flex-1 grid place-items-center">
       <div className="text-center">
-        <div className="w-20 h-20 mx-auto rounded-full bg-gradient-to-br from-brand-50 to-brand-100
-                        grid place-items-center mb-4 shadow-inner">
-          <MessagesSquare className="w-9 h-9 text-brand-500" />
+        <div className="w-20 h-20 mx-auto rounded-full bg-gradient-to-br from-emerald-50 to-emerald-100
+                        dark:from-emerald-500/15 dark:to-emerald-500/5
+                        grid place-items-center mb-4 shadow-inner
+                        dark:shadow-[0_0_30px_-8px_rgba(16,185,129,0.4)]">
+          <MessagesSquare className="w-9 h-9 text-emerald-500 dark:text-emerald-400" />
         </div>
-        <div className="text-base font-semibold text-slate-700">Your chats</div>
-        <div className="text-sm text-slate-400 mt-1 max-w-[280px]">
+        <div className="text-base font-semibold text-slate-700 dark:text-slate-100">Your chats</div>
+        <div className="text-sm text-slate-400 dark:text-slate-500 mt-1 max-w-[280px]">
           Select a conversation from the left to view messages and delivery status.
         </div>
       </div>

@@ -140,12 +140,13 @@ func parseDate(s string) (time.Time, error) {
 }
 
 // UpsertRetailerForRow is a convenience wrapper that also sets rec.RetailerID
-// when a retailer master is matched/created.
-func UpsertRetailerForRow(ctx context.Context, s *store.Store, rec *models.BillingRecord) error {
+// when a retailer master is matched/created. adminUserID stamps the
+// retailer + billing record so they're scoped to the uploader.
+func UpsertRetailerForRow(ctx context.Context, s *store.Store, adminUserID int64, rec *models.BillingRecord) error {
 	if rec.RetailerCode == nil || rec.RetailerName == nil || rec.WhatsappNumber == nil {
 		return nil
 	}
-	id, err := s.UpsertRetailer(ctx, *rec.RetailerCode, *rec.RetailerName, *rec.WhatsappNumber, "", "")
+	id, err := s.UpsertRetailer(ctx, adminUserID, *rec.RetailerCode, *rec.RetailerName, *rec.WhatsappNumber, "", "")
 	if err != nil {
 		return err
 	}

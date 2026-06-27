@@ -33,7 +33,7 @@ export default function MessageDetail() {
         title={`Message #${m.id}`}
         subtitle={`${m.retailer_name || '—'} · ${m.to_number}`}
         right={
-          <Link to="/messages">
+          <Link to="/admin/messages">
             <SecondaryButton><ArrowLeft className="w-4 h-4" /> All messages</SecondaryButton>
           </Link>
         }

@@ -24,6 +24,13 @@ export function fmtMoney(n?: number | null) {
   return '₹ ' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+export function batchDisplayName(batch?: { id?: number | string; display_name?: string | null; file_name?: string | null }) {
+  const custom = batch?.display_name?.trim()
+  if (custom) return custom
+  if (batch?.file_name) return batch.file_name
+  return batch?.id != null ? `Batch #${batch.id}` : 'Batch'
+}
+
 export function pct(n: number) {
   if (!isFinite(n)) return '—'
   return n.toFixed(1) + '%'

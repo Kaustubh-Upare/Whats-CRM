@@ -11,11 +11,12 @@ import (
 )
 
 func (s *Server) ListMessages(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	status := r.URL.Query().Get("status")
 	search := r.URL.Query().Get("q")
 	limit := intParam(r, "limit", 50)
 	offset := intParam(r, "offset", 0)
-	items, total, err := s.Store.ListMessages(r.Context(), status, search, limit, offset)
+	items, total, err := s.Store.ListMessages(r.Context(), uid, status, search, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -26,12 +27,13 @@ func (s *Server) ListMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetMessage(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	m, events, err := s.Store.GetMessage(r.Context(), id)
+	m, events, err := s.Store.GetMessage(r.Context(), uid, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -43,15 +45,25 @@ func (s *Server) GetMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"message": m, "events": events})
 }
 
-// ResendMessage resets a single failed job and re-enqueues it.
+// ResendMessage resets a single failed job and re-enqueues it. The
+// store-layer admin-guard prevents Admin A from resending Admin B's
+// job by guessing an id.
 func (s *Server) ResendMessage(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	id, ok := int64PathParam(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	j, err := s.Store.ResetJobForRetry(r.Context(), id)
+	j, err := s.Store.ResetJobForRetry(r.Context(), uid, id)
 	if err != nil {
+		// pgx.ErrNoRows is treated as 404 (the job either doesn't exist
+		// or isn't owned by this admin — same response either way to
+		// avoid leaking existence).
+		if err.Error() == "no rows in result set" {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -79,7 +91,6 @@ func (s *Server) ResendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uid := middleware.UserID(r)
 	email := middleware.Email(r)
 	ip := middleware.IP(r)
 	ua := middleware.UA(r)
@@ -95,16 +106,17 @@ func (s *Server) ResendMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": j.ID, "status": j.Status})
 }
 
-// ResendFailed bulk-resets all failed jobs (optionally scoped to a batch) and
-// re-enqueues them.
+// ResendFailed bulk-resets all failed jobs (optionally scoped to a batch)
+// owned by the calling admin and re-enqueues them.
 func (s *Server) ResendFailed(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	batchID := int64(0)
 	if v := r.URL.Query().Get("batch_id"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			batchID = n
 		}
 	}
-	jobs, err := s.Store.ResetManyFailedForRetry(r.Context(), batchID)
+	jobs, err := s.Store.ResetManyFailedForRetry(r.Context(), uid, batchID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -129,7 +141,6 @@ func (s *Server) ResendFailed(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	uid := middleware.UserID(r)
 	email := middleware.Email(r)
 	ip := middleware.IP(r)
 	ua := middleware.UA(r)

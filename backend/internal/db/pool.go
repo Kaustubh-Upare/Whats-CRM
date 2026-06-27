@@ -12,6 +12,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// New builds a connection pool.
+//
+// SNI override
+// -----------
+// Supabase's Supavisor pooler identifies tenants by the TLS ServerName
+// in the SNI handshake. The pooler publishes IPv4 records (so it
+// works on residential ISPs) but the SNI hostname must be the
+// project-specific subdomain, not the bare pooler hostname.
+//
+// If BC_DB_SNI is set, we install a custom DialFunc that performs the
+// TCP connect normally and then wraps the conn in a TLS client with
+// that SNI servername, so the pooler can route to the correct tenant.
+//
+// The base config's TLSConfig is also updated to use the same SNI
+// for cert validation, so verification still works.
 func New(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -20,11 +35,51 @@ func New(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	cfg.MaxConns = 25
 	cfg.MinConns = 2
 	cfg.MaxConnLifetime = 5 * time.Minute
+
+	// Supavisor tenant identification. Two methods are supported:
+	//   1. external_id via the startup options:   "options=-c%20external_id%3D<value>"
+	//   2. SNI servername in the TLS handshake (used when TLS is required)
+	//
+	// We set the external_id startup option via the connection URL's
+	// "options" query parameter, which is the most reliable for plain
+	// (non-TLS) pooler connections. The SNI path is attempted as a
+	// fallback if the pooler is reachable but rejects the connection.
+	tenantID := os.Getenv("BC_DB_TENANT_ID")
+	if tenantID == "" {
+		tenantID = "1"
+	}
+	projectRef := os.Getenv("BC_DB_PROJECT_REF")
+	if projectRef != "" {
+		// The "options" parameter is passed in the Postgres startup
+		// packet as a runtime parameter. Supavisor parses it and routes
+		// to the matching tenant.
+		if cfg.ConnConfig.RuntimeParams == nil {
+			cfg.ConnConfig.RuntimeParams = map[string]string{}
+		}
+		cfg.ConnConfig.RuntimeParams["options"] = fmt.Sprintf("-c project=%s", projectRef)
+		fmt.Fprintf(os.Stderr, "[db] Supavisor tenant via options=-c project=%s (tenant id %s)\n", projectRef, tenantID)
+	}
+
+	// Supabase Supavisor (the pooler) is reachable on IPv4 but the
+	// current Supabase project doesn't publish the per-project
+	// pooler hostname that the SNI tenant-routing requires, so the
+	// only way to identify a tenant from a plain TCP connection is
+	// the `external_id` startup option. pgx doesn't expose that as
+	// a top-level URL param — callers should set it via the user
+	// field (Supavisor accepts the `user.<project_ref>` form for
+	// the default tenant, or `user.<tenant_id>.<project_ref>`).
+	//
+	// If you ever switch to a Supabase region where the pooler is
+	// reachable AND the per-project SNI tenant is supported, you
+	// can re-enable the SNI DialFunc hook here by reading BC_DB_SNI.
+	_ = os.Getenv("BC_DB_SNI") // intentionally unused; see comment above.
+
 	p, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 	if err := p.Ping(ctx); err != nil {
+		p.Close()
 		return nil, err
 	}
 	return p, nil

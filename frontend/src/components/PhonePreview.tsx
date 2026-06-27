@@ -196,7 +196,13 @@ function PhoneFrame({ children }: { children: React.ReactNode }) {
       transition={{ type: 'spring', stiffness: 220, damping: 22 }}
       className="relative w-[300px] h-[600px] bg-slate-950 rounded-[40px] p-2 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.35)]"
     >
-      <div className="relative w-full h-full bg-white rounded-[32px] overflow-hidden flex flex-col">
+      <div
+        // `phone-screen` opts the inner out of the .dark-on safety net
+        // so the WhatsApp-styled mockup (light phone, dark text) renders
+        // identically in both themes. Without it, dark mode flips the
+        // inner to dark slate and the bubble text becomes invisible.
+        className="phone-screen relative w-full h-full bg-white rounded-[32px] overflow-hidden flex flex-col"
+      >
         {children}
       </div>
       {/* Side buttons */}
@@ -207,7 +213,7 @@ function PhoneFrame({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Avatar({ name, size = 32 }: { name: string; size?: number }) {
+export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
   const initials =
     name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '?'
   const hue = hashHue(name)
@@ -225,10 +231,210 @@ function Avatar({ name, size = 32 }: { name: string; size?: number }) {
   )
 }
 
-function hashHue(s: string): number {
+export function hashHue(s: string): number {
   let h = 0
   for (let i = 0; i < s.length; i++) {
     h = (h * 31 + s.charCodeAt(i)) % 360
   }
   return h
+}
+
+/* ---------------- PhonePreviewCard ---------------- */
+
+/**
+ * PhonePreviewCard — a self-contained phone mockup that takes the message
+ * body as a prop (no network fetch). Used wherever we already have the
+ * resolved body in React state and want an instant, flicker-free preview —
+ * most notably inside the Send Now / Review first-send dialog on BatchDetail
+ * so the operator sees exactly what the retailer will receive.
+ *
+ * Sizes:
+ *   - compact: 240×500, fits inside dense dialogs (Send Now)
+ *   - default: 280×580, two-up in Templates live-preview
+ *   - larger:  340×700, fills a right column at desktop widths
+ */
+export function PhonePreviewCard({
+  body,
+  recipientName,
+  size = 'default',
+}: {
+  body: string
+  recipientName: string
+  size?: 'compact' | 'default' | 'larger'
+}) {
+  // Size tokens. The phone frame (bezel) is sized in px, inner content
+  // uses flex so it adapts without recalculation.
+  const w = size === 'compact' ? 240 : size === 'larger' ? 340 : 280
+  const h = size === 'compact' ? 500 : size === 'larger' ? 700 : 580
+  const radius = size === 'compact' ? 32 : size === 'larger' ? 44 : 36
+  const innerRadius = size === 'compact' ? 26 : size === 'larger' ? 36 : 28
+  const pad = size === 'compact' ? 2 : size === 'larger' ? 3 : 2
+  const statusFont = size === 'compact' ? 'text-[9px]' : size === 'larger' ? 'text-[11px]' : 'text-[10px]'
+  const nameFont = size === 'compact' ? 'text-[11.5px]' : size === 'larger' ? 'text-[14px]' : 'text-[12px]'
+  const subFont = size === 'compact' ? 'text-[9px]' : size === 'larger' ? 'text-[11px]' : 'text-[10px]'
+  const bodyFont = size === 'compact' ? 'text-[11.5px]' : size === 'larger' ? 'text-[13.5px]' : 'text-[12px]'
+  const timeFont = size === 'compact' ? 'text-[8.5px]' : size === 'larger' ? 'text-[10px]' : 'text-[9px]'
+  const headerPx = size === 'compact' ? 'px-2.5 py-1.5' : size === 'larger' ? 'px-4 py-2.5' : 'px-3 py-2'
+  const bubblePx = size === 'compact' ? 'px-2 py-1.5' : size === 'larger' ? 'px-3 py-2' : 'px-2.5 py-1.5'
+  const composerPx = size === 'compact' ? 'px-2 py-1.5' : size === 'larger' ? 'px-3 py-2.5' : 'px-2 py-2'
+  const composerFont = size === 'compact' ? 'text-[10px] py-1' : size === 'larger' ? 'text-[12px] py-2' : 'text-[11px] py-1.5'
+  const notchW = size === 'compact' ? 88 : size === 'larger' ? 130 : 96
+  const composerH = size === 'compact' ? 26 : size === 'larger' ? 36 : 30
+  const sendBtn = size === 'compact' ? 26 : size === 'larger' ? 36 : 28
+  const sendIcon = size === 'compact' ? 11 : size === 'larger' ? 16 : 13
+  const tickSize = size === 'compact' ? 'w-2.5 h-2.5' : size === 'larger' ? 'w-3.5 h-3.5' : 'w-3 h-3'
+  const sideBtnR = size === 'compact' ? 40 : size === 'larger' ? 56 : 48
+  const sidePower = size === 'compact' ? 56 : size === 'larger' ? 76 : 64
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+      className="relative bg-slate-950 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.35)]"
+      style={{ width: w, height: h, borderRadius: radius, padding: pad }}
+    >
+      <div
+        // `phone-screen` opts the inner out of the .dark-on safety net
+        // so the WhatsApp-styled mockup (light phone, dark text) renders
+        // identically in both themes.
+        className="phone-screen relative w-full h-full bg-white overflow-hidden flex flex-col"
+        style={{ borderRadius: innerRadius }}
+      >
+        {/* Status bar */}
+        <div className={`flex items-center justify-between px-5 pt-2.5 pb-1 font-semibold text-slate-800 ${statusFont}`}>
+          <span>9:41</span>
+          <div className="flex items-center gap-1 text-slate-700">
+            <span>•••</span>
+            <span>◐</span>
+            <span>▮</span>
+          </div>
+        </div>
+
+        {/* Notch */}
+        <div className="relative h-5 flex items-center justify-center">
+          <div
+            className="absolute top-0 left-1/2 -translate-x-1/2 bg-slate-900 rounded-b-2xl"
+            style={{ width: notchW, height: 18 }}
+          />
+        </div>
+
+        {/* App header — WhatsApp dark green */}
+        <div className={`bg-[#075E54] text-white flex items-center gap-2 -mt-1 ${headerPx}`}>
+          <span className={`opacity-90 ${subFont}`}>‹</span>
+          <Avatar name={recipientName} size={size === 'compact' ? 24 : size === 'larger' ? 32 : 28} />
+          <div className="flex-1 min-w-0">
+            <div className={`font-medium truncate ${nameFont}`}>{recipientName}</div>
+            <div className={`opacity-80 ${subFont}`}>online</div>
+          </div>
+          <span className={`opacity-90 ${subFont}`}>📹</span>
+          <span className={`opacity-90 ${subFont}`}>📞</span>
+          <span className={`opacity-90 ${subFont}`}>⋮</span>
+        </div>
+
+        {/* Chat background + bubble */}
+        <div
+          className="flex-1 overflow-hidden px-3 py-4"
+          style={{
+            backgroundColor: '#E5DDD5',
+            backgroundImage:
+              "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'><path d='M0 0h40v40H0z' fill='none'/><path d='M8 6c2 0 2 2 0 2s-2-2 0-2zm24 0c2 0 2 2 0 2s-2-2 0-2zM8 32c2 0 2 2 0 2s-2-2 0-2zm24 0c2 0 2 2 0 2s-2-2 0-2zM20 14c1.5 0 1.5 2 0 2s-1.5-2 0-2zm0 14c1.5 0 1.5 2 0 2s-1.5-2 0-2z' fill='%23c9c2b6' opacity='0.4'/></svg>\")",
+            backgroundSize: '40px 40px',
+          }}
+        >
+          {/* Keying on body makes AnimatePresence replay the entry animation
+              whenever the operator switches templates — the "wow" moment. */}
+          <AnimatePresence mode="wait" initial={false}>
+            {body ? (
+              <motion.div
+                key={body}
+                initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.97 }}
+                transition={{ duration: 0.22 }}
+                className="flex justify-end"
+              >
+                <div className="relative max-w-[88%]">
+                  <div
+                    className={`relative bg-[#DCF8C6] text-slate-900 rounded-lg shadow-sm whitespace-pre-wrap break-words ${bubblePx} ${bodyFont}`}
+                    style={{ lineHeight: 1.4 }}
+                  >
+                    {/* Tail */}
+                    <svg
+                      className="absolute -right-1 -top-1 w-2 h-2 text-[#DCF8C6]"
+                      viewBox="0 0 8 8"
+                      fill="currentColor"
+                    >
+                      <path d="M0 0 L8 0 L0 8 Z" />
+                    </svg>
+                    {body}
+                    <div className="flex items-center justify-end gap-1 mt-1 -mb-0.5">
+                      <span className={`text-slate-500 tabular-nums ${timeFont}`}>9:41</span>
+                      <svg
+                        viewBox="0 0 18 18"
+                        className={`text-sky-500 ${tickSize}`}
+                        fill="currentColor"
+                      >
+                        <path d="M17.4 4.2L7.6 14L4.2 10.6L5.2 9.6L7.6 12L16.4 3.2Z" />
+                        <path d="M12.4 4.2L2.6 14L1.6 13L11.4 3.2Z" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full flex items-center justify-center"
+              >
+                <div className={`text-slate-500/80 italic ${subFont}`}>
+                  Select a template to preview
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Composer */}
+        <div className={`bg-[#F0F0F0] flex items-center gap-1.5 ${composerPx}`}>
+          <div
+            className="flex-1 bg-white rounded-full px-3 text-slate-400 flex items-center"
+            style={{ height: composerH }}
+          >
+            <span className={composerFont}>Type a message</span>
+          </div>
+          <div
+            className="rounded-full bg-[#075E54] grid place-items-center"
+            style={{ width: sendBtn, height: sendBtn }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="text-white"
+              style={{ width: sendIcon, height: sendIcon }}
+              fill="currentColor"
+            >
+              <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      {/* Side buttons */}
+      <span
+        className="absolute -left-[2px] bg-slate-800 rounded-l-sm"
+        style={{ top: 110, width: 3, height: 32 }}
+      />
+      <span
+        className="absolute -left-[2px] bg-slate-800 rounded-l-sm"
+        style={{ top: 160, width: 3, height: sideBtnR }}
+      />
+      <span
+        className="absolute -right-[2px] bg-slate-800 rounded-r-sm"
+        style={{ top: 160, width: 3, height: sidePower }}
+      />
+    </motion.div>
+  )
 }

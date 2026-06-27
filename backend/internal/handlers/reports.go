@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/whatsyitc/backend/internal/middleware"
 )
 
 func (s *Server) ReportSummary(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	from, to := parseRange(r)
-	summary, err := s.Store.ReportSummary(r.Context(), from, to)
+	summary, err := s.Store.ReportSummary(r.Context(), uid, from, to)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -57,7 +60,7 @@ func (s *Server) ReportTrend(w http.ResponseWriter, r *http.Request) {
 		fromT = toT.AddDate(0, 0, -(maxDays - 1))
 	}
 
-	points, err := s.Store.ReportsTrend(r.Context(), fromT, toT)
+	points, err := s.Store.ReportsTrend(r.Context(), middleware.UserID(r), fromT, toT)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -76,8 +79,9 @@ func (s *Server) ReportTrend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ReportExport(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserID(r)
 	from, to := parseRange(r)
-	rows, _, err := s.Store.ListMessages(r.Context(), "", "", 100000, 0)
+	rows, _, err := s.Store.ListMessages(r.Context(), uid, "", "", 100000, 0)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

@@ -7,10 +7,10 @@ import {
   AlertTriangle, CheckCircle2, RotateCcw,
 } from 'lucide-react'
 import { api } from '@/lib/api'
-import { Card, CardHeader, Empty, ErrorBox, PageHeader, PrimaryButton, SecondaryButton, Spinner } from '@/components/ui'
+import { Card, CardHeader, ErrorBox, PageHeader, PrimaryButton, SecondaryButton, Spinner } from '@/components/ui'
 import { fmtDate } from '@/lib/format'
 import { containerStagger, itemFadeUp } from '@/lib/motion'
-import PhonePreview from '@/components/PhonePreview'
+import { PhonePreviewCard } from '@/components/PhonePreview'
 import type { Template } from '@/lib/types'
 
 type PreviewResp = {
@@ -23,24 +23,46 @@ type PreviewResp = {
 const LANG_OPTIONS = ['en', 'hi', 'mr']
 const CATEGORY_OPTIONS = ['utility', 'marketing', 'authentication']
 
-const DEFAULT_FORM = {
-  name: 'billing_summary_v1',
-  language_code: 'en',
-  category: 'utility',
-  body:
-    'Hello {{1}},\n\nYour billing summary for {{2}}.\n\n' +
-    'Invoice: {{3}}\nAmount: INR {{4}}\nDue Date: {{5}}\n\n' +
-    'For billing queries contact {{6}}.',
-  sample_payload:
-    '{\n  "1": "Sharma Kirana Store",\n  "2": "2026-06-19",\n  "3": "INV-2026-001",\n  "4": "12500.50",\n  "5": "2026-06-26",\n  "6": "support@itc.example"\n}',
-  is_active: true,
+// Starter body — a reasonable billing-summary template the user can edit
+// inline. Name is left BLANK so each new template is named by the user,
+// not pre-filled with a global default that another user might already
+// own. Per-admin uniqueness on (name, language_code) means two users
+// can independently create their own copies.
+const STARTER_BODY =
+  'Hello {{1}},\n\nYour billing summary for {{2}}.\n\n' +
+  'Invoice: {{3}}\nAmount: INR {{4}}\nDue Date: {{5}}\n\n' +
+  'For billing queries contact {{6}}.'
+
+const STARTER_SAMPLE =
+  '{\n  "1": "Sharma Kirana Store",\n  "2": "2026-06-19",\n  "3": "INV-2026-001",\n  "4": "12500.50",\n  "5": "2026-06-26",\n  "6": "support@itc.example"\n}'
+
+function makeDefaultForm(): {
+  name: string
+  language_code: string
+  category: string
+  body: string
+  sample_payload: string
+  is_active: boolean
+} {
+  return {
+    // Empty so the operator types their own name. We DO NOT pre-fill
+    // 'billing_summary_v1' — another admin in this same workspace might
+    // already own that name, and per-admin uniqueness (migration 007)
+    // would 409 the save. Let the user decide what to call theirs.
+    name: '',
+    language_code: 'en',
+    category: 'utility',
+    body: STARTER_BODY,
+    sample_payload: STARTER_SAMPLE,
+    is_active: true,
+  }
 }
 
 export default function Templates() {
   const qc = useQueryClient()
   const [editingId, setEditingId] = useState<number | null>(null)
   const [creatingNew, setCreatingNew] = useState(false)
-  const [form, setForm] = useState({ ...DEFAULT_FORM })
+  const [form, setForm] = useState(makeDefaultForm())
 
   const list = useQuery({
     queryKey: ['templates'],
@@ -101,7 +123,7 @@ export default function Templates() {
   function startCreate() {
     setEditingId(null)
     setCreatingNew(true)
-    setForm({ ...DEFAULT_FORM })
+    setForm(makeDefaultForm())
   }
   function startEdit(t: Template) {
     setEditingId(t.id)
@@ -121,7 +143,7 @@ export default function Templates() {
   function cancelEdit() {
     setEditingId(null)
     setCreatingNew(false)
-    setForm({ ...DEFAULT_FORM })
+    setForm(makeDefaultForm())
   }
 
   const save = useMutation({
@@ -207,16 +229,38 @@ export default function Templates() {
           {list.isError && <ErrorBox msg={(list.error as any)?.message || 'Failed to load'} />}
           {list.data && list.data.length === 0 && (
             <Card hover={false}>
-              <Empty>
-                No templates yet. Create one to start sending billing messages.
-              </Empty>
+              <div className="p-10 text-center">
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  className="mx-auto w-14 h-14 rounded-2xl
+                             bg-emerald-50 dark:bg-emerald-500/15
+                             grid place-items-center mb-4
+                             border border-emerald-200 dark:border-emerald-400/30"
+                >
+                  <FileText className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
+                </motion.div>
+                <div className="text-base font-semibold text-slate-900 dark:text-white">
+                  No templates in your workspace yet
+                </div>
+                <div className="text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto leading-relaxed">
+                  Templates are scoped to your workspace — anything you create here is private to you
+                  and won't be visible to other admins.
+                </div>
+                <div className="mt-5">
+                  <PrimaryButton onClick={startCreate}>
+                    <Plus className="w-4 h-4" /> Create your first template
+                  </PrimaryButton>
+                </div>
+              </div>
             </Card>
           )}
           {list.data && list.data.length > 0 && (
             <motion.div variants={containerStagger} initial="hidden" animate="show" className="space-y-3">
               {activeTemplate && (
                 <motion.div variants={itemFadeUp}>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 px-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-1">
                     Currently active
                   </div>
                   <div className="mt-1.5">
@@ -264,13 +308,13 @@ export default function Templates() {
                 transition={{ duration: 0.25 }}
               >
                 <Card hover={false} className="p-10 text-center">
-                  <div className="mx-auto w-12 h-12 rounded-2xl bg-brand-50 grid place-items-center">
-                    <FileText className="w-6 h-6 text-brand-600" />
+                  <div className="mx-auto w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-500/15 grid place-items-center">
+                    <FileText className="w-6 h-6 text-emerald-600 dark:text-emerald-300" />
                   </div>
-                  <div className="mt-4 text-base font-semibold text-slate-900">
+                  <div className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
                     Pick a template to edit
                   </div>
-                  <div className="mt-1.5 text-sm text-slate-500">
+                  <div className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
                     Or create a new one to send a different message body to your retailers.
                   </div>
                   <div className="mt-5">
@@ -310,7 +354,7 @@ export default function Templates() {
                               if (confirm(`Delete template "${selected.name}" (${selected.language_code})?`)) del.mutate(selected)
                             }}
                             disabled={del.isPending}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-rose-700 hover:bg-rose-50 text-sm disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-500/15 text-sm disabled:opacity-50"
                           >
                             <Trash2 className="w-4 h-4" /> Delete
                           </button>
@@ -336,10 +380,18 @@ export default function Templates() {
                         <input
                           value={form.name}
                           onChange={(e) => setForm({ ...form, name: e.target.value })}
-                          placeholder="billing_summary_v1"
-                          className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm font-mono"
+                          placeholder="e.g. acme_billing_v1, monthly_summary, festival_offer"
+                          className="w-full border border-slate-300 dark:border-[var(--input-border)]
+                                     bg-white dark:bg-[var(--input-bg)]
+                                     text-slate-900 dark:text-slate-100
+                                     placeholder:text-slate-400 dark:placeholder:text-slate-500
+                                     rounded-md px-3 py-2 text-sm font-mono
+                                     focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:focus:ring-emerald-500/60"
                         />
-                        <Hint>The unique key used by ApproveBatch — keep stable once you go live.</Hint>
+                        <Hint>
+                          A unique name within your workspace. Lowercase + underscores recommended.
+                          Other admins can use the same name — each user has their own namespace.
+                        </Hint>
                       </Field>
                     </motion.div>
                     <motion.div variants={itemFadeUp} className="md:col-span-1">
@@ -347,7 +399,11 @@ export default function Templates() {
                         <select
                           value={form.language_code}
                           onChange={(e) => setForm({ ...form, language_code: e.target.value })}
-                          className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
+                          className="w-full border border-slate-300 dark:border-[var(--input-border)]
+                                     bg-white dark:bg-[var(--input-bg)]
+                                     text-slate-900 dark:text-slate-100
+                                     rounded-md px-3 py-2 text-sm
+                                     focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:focus:ring-emerald-500/60"
                         >
                           {LANG_OPTIONS.map((l) => (
                             <option key={l} value={l}>{l}</option>
@@ -360,7 +416,11 @@ export default function Templates() {
                         <select
                           value={form.category}
                           onChange={(e) => setForm({ ...form, category: e.target.value })}
-                          className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
+                          className="w-full border border-slate-300 dark:border-[var(--input-border)]
+                                     bg-white dark:bg-[var(--input-bg)]
+                                     text-slate-900 dark:text-slate-100
+                                     rounded-md px-3 py-2 text-sm
+                                     focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:focus:ring-emerald-500/60"
                         >
                           {CATEGORY_OPTIONS.map((c) => (
                             <option key={c} value={c}>{c}</option>
@@ -386,7 +446,11 @@ export default function Templates() {
                           onChange={(e) => setForm({ ...form, body: e.target.value })}
                           rows={8}
                           spellCheck={false}
-                          className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm font-mono leading-relaxed"
+                          className="w-full border border-slate-300 dark:border-[var(--input-border)]
+                                     bg-white dark:bg-[var(--input-bg)]
+                                     text-slate-900 dark:text-slate-100
+                                     rounded-md px-3 py-2 text-sm font-mono leading-relaxed
+                                     focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:focus:ring-emerald-500/60"
                         />
                         <Hint>
                           Use <code className="bg-slate-100 px-1 rounded">{'{{1}}'}</code>..<code className="bg-slate-100 px-1 rounded">{'{{N}}'}</code> for
@@ -415,7 +479,11 @@ export default function Templates() {
                           onChange={(e) => setForm({ ...form, sample_payload: e.target.value })}
                           rows={6}
                           spellCheck={false}
-                          className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm font-mono leading-relaxed"
+                          className="w-full border border-slate-300 dark:border-[var(--input-border)]
+                                     bg-white dark:bg-[var(--input-bg)]
+                                     text-slate-900 dark:text-slate-100
+                                     rounded-md px-3 py-2 text-sm font-mono leading-relaxed
+                                     focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:focus:ring-emerald-500/60"
                         />
                         <Hint>
                           Used to render the live preview below. Not required — the worker
@@ -451,11 +519,11 @@ export default function Templates() {
 
                 {/* LIVE PREVIEW */}
                 <Card hover={false} className="!p-0 overflow-hidden">
-                  <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+                  <div className="px-5 py-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Eye className="w-4 h-4 text-brand-500" />
-                      <div className="font-semibold text-sm">Live preview</div>
-                      <span className="text-[11px] text-slate-500">
+                      <Eye className="w-4 h-4 text-emerald-500" />
+                      <div className="font-semibold text-sm text-slate-900 dark:text-white">Live preview</div>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
                         rendered with the sample payload above
                       </span>
                     </div>
@@ -476,10 +544,10 @@ export default function Templates() {
 
                   <div className="p-8 bg-gradient-to-br from-slate-50 via-white to-slate-100/60">
                     <div className="flex justify-center">
-                      <PhonePreviewStandalone
+                      <PhonePreviewCard
                         body={preview?.body || form.body}
                         recipientName={pickStringValue(form.sample_payload, ['1', 'retailer_name', 'name']) || 'Preview'}
-                        larger
+                        size="larger"
                       />
                     </div>
                     {preview?.unresolved_tokens && preview.unresolved_tokens.length > 0 && (
@@ -523,7 +591,7 @@ export default function Templates() {
                           disabled={toggleActive.isPending}
                           className={`inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 ${
                             selected.is_active
-                              ? 'border border-slate-300 hover:bg-slate-50 text-slate-700'
+                              ? 'border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-200'
                               : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                           }`}
                         >
@@ -533,9 +601,9 @@ export default function Templates() {
                       }
                     />
                     {activeTemplate && activeTemplate.id !== selected.id && (
-                      <div className="p-5 text-sm text-slate-600">
-                        <span className="font-medium text-slate-800">{activeTemplate.name}</span>{' '}
-                        <span className="text-slate-400">·</span> {activeTemplate.language_code} is currently active.
+                      <div className="p-5 text-sm text-slate-600 dark:text-slate-300">
+                        <span className="font-medium text-slate-800 dark:text-white">{activeTemplate.name}</span>{' '}
+                        <span className="text-slate-400 dark:text-slate-500">·</span> {activeTemplate.language_code} is currently active.
                         Activating <span className="font-mono">{selected.name}</span> will replace it.
                       </div>
                     )}
@@ -568,38 +636,38 @@ function TemplateRow({
       onClick={onSelect}
       whileHover={{ scale: 1.005 }}
       whileTap={{ scale: 0.995 }}
-      className={`w-full text-left bg-white border rounded-xl p-3.5 transition-shadow ${
+      className={`w-full text-left admin-card border rounded-xl p-3.5 transition-shadow ${
         selected
-          ? 'border-brand-400 ring-2 ring-brand-100 shadow-sm'
+          ? '!border-emerald-400 ring-2 ring-emerald-100 dark:ring-emerald-400/30 shadow-sm'
           : active
-            ? 'border-emerald-300 shadow-sm'
-            : 'border-slate-200 hover:border-slate-300'
+            ? '!border-emerald-300 dark:!border-emerald-400/50 shadow-sm'
+            : '!border-slate-200 dark:!border-white/10 hover:!border-slate-300 dark:hover:!border-white/20'
       }`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <FileText className="w-4 h-4 text-slate-400 shrink-0" />
-          <span className="font-mono text-sm truncate text-slate-800">{t.name}</span>
+          <FileText className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />
+          <span className="font-mono text-sm truncate text-slate-800 dark:text-slate-100">{t.name}</span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {active && (
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-400/30">
               ACTIVE
             </span>
           )}
-          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10">
             {t.language_code}
           </span>
         </div>
       </div>
-      <div className="mt-1.5 text-xs text-slate-500 flex items-center gap-1.5">
+      <div className="mt-1.5 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
         <span>{t.variable_count} var{t.variable_count === 1 ? '' : 's'}</span>
-        <span className="text-slate-300">·</span>
+        <span className="text-slate-300 dark:text-slate-600">·</span>
         <span className="capitalize">{t.category}</span>
-        <span className="text-slate-300">·</span>
+        <span className="text-slate-300 dark:text-slate-600">·</span>
         <span>{fmtDate(t.created_at)}</span>
       </div>
-      <div className="mt-2 text-[12px] text-slate-600 line-clamp-2 font-mono">
+      <div className="mt-2 text-[12px] text-slate-600 dark:text-slate-300 line-clamp-2 font-mono">
         {t.body.split('\n')[0]}
       </div>
     </motion.button>
@@ -617,140 +685,6 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
 
 function Hint({ children }: { children: React.ReactNode }) {
   return <div className="mt-1.5 text-[11px] text-slate-500">{children}</div>
-}
-
-/**
- * Small standalone phone preview — used on the /templates page where we don't
- * have a batch row to render. Mirrors PhonePreview's bubble styling but
- * takes raw body + recipient name instead of fetching from a batch.
- *
- * Two sizes:
- *   - default: 280×580 phone, fits two-up in the preview grid
- *   - larger:  340×700 phone, fills the right column at desktop widths
- */
-function PhonePreviewStandalone({
-  body,
-  recipientName,
-  larger = false,
-}: {
-  body: string
-  recipientName: string
-  larger?: boolean
-}) {
-  const w = larger ? 340 : 280
-  const h = larger ? 700 : 580
-  const radius = larger ? 44 : 36
-  const innerRadius = larger ? 36 : 28
-  const pad = larger ? 3 : 2
-  const statusFont = larger ? 'text-[11px]' : 'text-[10px]'
-  const nameFont = larger ? 'text-[14px]' : 'text-[12px]'
-  const subFont = larger ? 'text-[11px]' : 'text-[10px]'
-  const bodyFont = larger ? 'text-[13.5px]' : 'text-[12px]'
-  const timeFont = larger ? 'text-[10px]' : 'text-[9px]'
-  const headerPx = larger ? 'px-4 py-2.5' : 'px-3 py-2'
-  const bubblePx = larger ? 'px-3 py-2' : 'px-2.5 py-1.5'
-  const composerPx = larger ? 'px-3 py-2.5' : 'px-2 py-2'
-  const composerFont = larger ? 'text-[12px] py-2' : 'text-[11px] py-1.5'
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ type: 'spring', stiffness: 220, damping: 22 }}
-      className="relative bg-slate-950 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.35)]"
-      style={{ width: w, height: h, borderRadius: radius, padding: pad }}
-    >
-      <div
-        className="relative w-full h-full bg-white overflow-hidden flex flex-col"
-        style={{ borderRadius: innerRadius }}
-      >
-        {/* Status bar */}
-        <div className={`flex items-center justify-between px-5 pt-2.5 pb-1 font-semibold text-slate-800 ${statusFont}`}>
-          <span>9:41</span>
-          <div className="flex items-center gap-1 text-slate-700">
-            <span>•••</span>
-            <span>◐</span>
-            <span>▮</span>
-          </div>
-        </div>
-        {/* Notch */}
-        <div className="relative h-5 flex items-center justify-center">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-slate-900 rounded-b-2xl"
-               style={{ width: larger ? 130 : 96, height: 18 }} />
-        </div>
-        {/* App header */}
-        <div className={`bg-[#075E54] text-white flex items-center gap-2 -mt-1 ${headerPx}`}>
-          <span className={`opacity-90 ${subFont}`}>‹</span>
-          <div className="flex-1 min-w-0">
-            <div className={`font-medium truncate ${nameFont}`}>{recipientName}</div>
-            <div className={`opacity-80 ${subFont}`}>online</div>
-          </div>
-          <span className={`opacity-90 ${subFont}`}>📹</span>
-          <span className={`opacity-90 ${subFont}`}>📞</span>
-          <span className={`opacity-90 ${subFont}`}>⋮</span>
-        </div>
-        {/* Chat background + bubble */}
-        <div
-          className="flex-1 overflow-hidden px-3 py-4"
-          style={{
-            backgroundColor: '#E5DDD5',
-            backgroundImage:
-              "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'><path d='M0 0h40v40H0z' fill='none'/><path d='M8 6c2 0 2 2 0 2s-2-2 0-2zm24 0c2 0 2 2 0 2s-2-2 0-2zM8 32c2 0 2 2 0 2s-2-2 0-2zm24 0c2 0 2 2 0 2s-2-2 0-2zM20 14c1.5 0 1.5 2 0 2s-1.5-2 0-2zm0 14c1.5 0 1.5 2 0 2s-1.5-2 0-2z' fill='%23c9c2b6' opacity='0.4'/></svg>\")",
-            backgroundSize: '40px 40px',
-          }}
-        >
-          <motion.div
-            key={body}
-            initial={{ opacity: 0, y: 6, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.22 }}
-            className="flex justify-end"
-          >
-            <div className="relative max-w-[88%]">
-              <div
-                className={`relative bg-[#DCF8C6] text-slate-900 rounded-lg shadow-sm whitespace-pre-wrap break-words ${bubblePx} ${bodyFont}`}
-                style={{ lineHeight: 1.4 }}
-              >
-                <svg
-                  className="absolute -right-1 -top-1 w-2 h-2 text-[#DCF8C6]"
-                  viewBox="0 0 8 8"
-                  fill="currentColor"
-                >
-                  <path d="M0 0 L8 0 L0 8 Z" />
-                </svg>
-                {body}
-                <div className="flex items-center justify-end gap-1 mt-1 -mb-0.5">
-                  <span className={`text-slate-500 tabular-nums ${timeFont}`}>9:41</span>
-                  <svg viewBox="0 0 18 18" className={`text-sky-500 ${larger ? 'w-3.5 h-3.5' : 'w-3 h-3'}`} fill="currentColor">
-                    <path d="M17.4 4.2L7.6 14L4.2 10.6L5.2 9.6L7.6 12L16.4 3.2Z" />
-                    <path d="M12.4 4.2L2.6 14L1.6 13L11.4 3.2Z" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-        {/* Composer */}
-        <div className={`bg-[#F0F0F0] flex items-center gap-1.5 ${composerPx}`}>
-          <div className="flex-1 bg-white rounded-full px-3 text-slate-400 flex items-center" style={{ height: larger ? 36 : 30 }}>
-            <span className={composerFont}>Type a message</span>
-          </div>
-          <div
-            className="rounded-full bg-[#075E54] grid place-items-center"
-            style={{ width: larger ? 36 : 28, height: larger ? 36 : 28 }}
-          >
-            <svg viewBox="0 0 24 24" className="text-white" style={{ width: larger ? 16 : 13, height: larger ? 16 : 13 }} fill="currentColor">
-              <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
-            </svg>
-          </div>
-        </div>
-      </div>
-      {/* Side buttons */}
-      <span className="absolute -left-[2px] bg-slate-800 rounded-l-sm" style={{ top: 110, width: 3, height: 32 }} />
-      <span className="absolute -left-[2px] bg-slate-800 rounded-l-sm" style={{ top: 160, width: 3, height: larger ? 56 : 48 }} />
-      <span className="absolute -right-[2px] bg-slate-800 rounded-r-sm" style={{ top: 160, width: 3, height: larger ? 76 : 64 }} />
-    </motion.div>
-  )
 }
 
 /* ---------- helpers ---------- */

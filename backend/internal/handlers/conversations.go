@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/whatsyitc/backend/internal/middleware"
 	"github.com/whatsyitc/backend/internal/store"
 )
 
@@ -11,7 +12,8 @@ func (s *Server) ListConversations(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("q")
 	limit := intParam(r, "limit", 50)
 	offset := intParam(r, "offset", 0)
-	items, total, err := s.Store.ListConversations(r.Context(), search, limit, offset)
+	uid := middleware.UserID(r)
+	items, total, err := s.Store.ListConversations(r.Context(), uid, search, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -31,7 +33,8 @@ func (s *Server) GetConversationMessages(w http.ResponseWriter, r *http.Request)
 	}
 	limit := intParam(r, "limit", 500)
 	offset := intParam(r, "offset", 0)
-	items, err := s.Store.ListConversationMessages(r.Context(), id, limit, offset)
+	uid := middleware.UserID(r)
+	items, err := s.Store.ListConversationMessages(r.Context(), uid, id, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -50,7 +53,8 @@ func (s *Server) GetConversationByPhone(w http.ResponseWriter, r *http.Request) 
 	}
 	limit := intParam(r, "limit", 500)
 	offset := intParam(r, "offset", 0)
-	items, err := s.Store.ListConversationMessagesByPhone(r.Context(), phone, limit, offset)
+	uid := middleware.UserID(r)
+	items, err := s.Store.ListConversationMessagesByPhone(r.Context(), uid, phone, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

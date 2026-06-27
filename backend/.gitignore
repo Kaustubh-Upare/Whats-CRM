@@ -33,7 +33,6 @@ vendor/
 # Real env files; keep the example for reference
 .env
 .env.*
-!.env.example
 *.env.local
 secrets.json
 
@@ -79,3 +78,4 @@ heap.dump
 # --- Air (live-reload) ---
 tmp/
 .air/
+.env.example

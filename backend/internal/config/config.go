@@ -50,11 +50,23 @@ type Config struct {
 
 	PostgresURI string
 
-	WhatsAPIVersion  string
-	WhatsPhoneID     string
-	WhatsAccessToken string
-	WhatsVerifyToken string
-	WhatsForceText   bool // WHATS_FORCE_TEXT=true => skip template, send as free-form text (test-mode only)
+	// FieldEncKey is the 32-byte (AES-256) key used to encrypt
+	// per-user secrets at rest (currently the WhatsApp access_token
+	// and verify_token columns). Loaded from BC_FIELD_ENC_KEY.
+	FieldEncKey []byte
+
+	// WhatsAPIVersion is the default Meta Graph API version used when
+	// an admin has not overridden it in their settings row.
+	WhatsAPIVersion string
+
+	// GoogleOAuthClientID / ClientSecret / RedirectURL configure the
+	// "Continue with Google" button on /login. When ClientID is empty,
+	// the button renders a disabled state and the /auth/google endpoint
+	// returns a helpful error — so a fresh deployment without OAuth
+	// configured doesn't break the rest of the app.
+	GoogleOAuthClientID     string
+	GoogleOAuthClientSecret string
+	GoogleOAuthRedirectURL  string
 }
 
 func Load() *Config {
@@ -70,13 +82,14 @@ func Load() *Config {
 		JWTAudience:       getEnv("BC_JWT_AUDIENCE", "whatsyitc-admin"),
 		PostgresURI:       os.Getenv("POSTGRES_URI"),
 		JWTSecret:         firstNonEmpty(os.Getenv("BC_JWT_SECRET"), os.Getenv("JWT_SECRET")),
-		WhatsAPIVersion:   getEnv("WHATS_API_VERSION", "v18.0"),
-		WhatsPhoneID:      os.Getenv("WHATS_PHONE_NUMBER_ID"),
-		WhatsAccessToken:  os.Getenv("WHATS_ACCESS_TOKEN"),
-		WhatsVerifyToken:  os.Getenv("WHATS_VERIFY_TOKEN"),
-		WhatsForceText:    getBool("WHATS_FORCE_TEXT", false),
+		FieldEncKey:       []byte(os.Getenv("BC_FIELD_ENC_KEY")),
+		WhatsAPIVersion:   getEnv("WHATS_API_VERSION", "v25.0"),
 		LoginRPS:          getFloat("BC_LOGIN_RPS", 1),
 		LoginBurst:        getInt("BC_LOGIN_BURST", 5),
+
+		GoogleOAuthClientID:     os.Getenv("BC_GOOGLE_CLIENT_ID"),
+		GoogleOAuthClientSecret: os.Getenv("BC_GOOGLE_CLIENT_SECRET"),
+		GoogleOAuthRedirectURL:  getEnv("BC_GOOGLE_REDIRECT_URL", ""),
 	}
 	if c.PostgresURI == "" {
 		log.Fatal("POSTGRES_URI is required (copy from backend/.env.example)")
@@ -94,6 +107,22 @@ func Load() *Config {
 	}
 	if c.WorkerConcurrency < 1 {
 		log.Fatalf("BC_WORKER_CONCURRENCY must be >= 1 (got %d)", c.WorkerConcurrency)
+	}
+	if len(c.FieldEncKey) != 32 {
+		// AES-256 needs exactly 32 bytes. We refuse to boot rather than
+		// silently fall back to a derived/predictable key — losing access
+		// to all stored credentials is worse than a startup failure.
+		log.Fatalf("BC_FIELD_ENC_KEY must be exactly 32 bytes (got %d). Generate with: openssl rand -base64 48 | head -c 32", len(c.FieldEncKey))
+	}
+	// Default the OAuth redirect URL to the **frontend** origin so the
+	// post-callback redirect lands on the React app, not the bare Go
+	// server (which doesn't serve /login). Vite's dev proxy forwards
+	// /auth/* to the backend, so this single URL works for both dev
+	// (5173) and any production deployment where the frontend sits at
+	// the public origin. Override via BC_GOOGLE_REDIRECT_URL when the
+	// backend lives at a different public hostname.
+	if c.GoogleOAuthRedirectURL == "" {
+		c.GoogleOAuthRedirectURL = "http://localhost:5173/auth/google/callback"
 	}
 	return c
 }
