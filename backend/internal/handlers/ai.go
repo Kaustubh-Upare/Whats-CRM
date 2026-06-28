@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/whatsyitc/backend/internal/ai/chunker"
+	"github.com/whatsyitc/backend/internal/ai/retrieval"
 	"github.com/whatsyitc/backend/internal/audit"
 	"github.com/whatsyitc/backend/internal/llm"
 	"github.com/whatsyitc/backend/internal/middleware"
@@ -411,7 +412,7 @@ func (s *Server) TestAIAgent(w http.ResponseWriter, r *http.Request) {
 	if cfg != nil && cfg.ID > 0 {
 		agentScopeID = &cfg.ID
 	}
-	chunks, err := s.Store.SearchAIKBForAgent(r.Context(), uid, agentScopeID, req.Message, 5)
+	chunks, err := s.searchAIKnowledge(r.Context(), uid, agentScopeID, req.Message, 5)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -569,6 +570,106 @@ func topRetrievedScore(chunks []models.AIRetrievedChunk) float64 {
 	return top
 }
 
+func (s *Server) searchAIKnowledge(ctx context.Context, adminID int64, agentID *int64, query string, topK int) ([]models.AIRetrievedChunk, error) {
+	if s.Retriever == nil {
+		return s.Store.SearchAIKBForAgent(ctx, adminID, agentID, query, topK)
+	}
+	var (
+		chunks []retrieval.RetrievedChunk
+		err    error
+	)
+	if agentID != nil && *agentID > 0 {
+		chunks, err = s.Retriever.RetrieveForAgent(ctx, adminID, *agentID, query)
+	} else {
+		chunks, err = s.Retriever.Retrieve(ctx, adminID, query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.AIRetrievedChunk, 0, len(chunks))
+	for _, c := range chunks {
+		out = append(out, models.AIRetrievedChunk{
+			ID:         c.ID,
+			Title:      c.Title,
+			Content:    c.Content,
+			SourceType: c.SourceType,
+			SourceRef:  c.SourceRef,
+			VectorSim:  c.VectorSim,
+			KeywordSim: c.KeywordSim,
+			FinalScore: c.FinalScore,
+		})
+	}
+	return out, nil
+}
+
+func (s *Server) addAIKnowledgeChunk(ctx context.Context, adminID int64, chunk *models.AIKBChunk) (int64, error) {
+	id, err := s.Store.AddAIKB(ctx, adminID, chunk)
+	if err != nil {
+		return 0, err
+	}
+	s.embedAIKnowledgeChunk(ctx, adminID, id, chunk.Title, chunk.Content)
+	return id, nil
+}
+
+type aiKBEmbeddingInput struct {
+	ID      int64
+	Title   string
+	Content string
+}
+
+func (s *Server) embedAIKnowledgeChunks(ctx context.Context, adminID int64, chunks []aiKBEmbeddingInput) {
+	if s.LLM == nil || !s.LLM.HasEmbeddings() || len(chunks) == 0 {
+		return
+	}
+	const batchSize = 64
+	for start := 0; start < len(chunks); start += batchSize {
+		end := start + batchSize
+		if end > len(chunks) {
+			end = len(chunks)
+		}
+		batch := chunks[start:end]
+		texts := make([]string, 0, len(batch))
+		indexes := make([]int, 0, len(batch))
+		for i, item := range batch {
+			text := strings.TrimSpace(strings.TrimSpace(item.Title) + "\n\n" + strings.TrimSpace(item.Content))
+			if text == "" {
+				continue
+			}
+			texts = append(texts, text)
+			indexes = append(indexes, i)
+		}
+		if len(texts) == 0 {
+			continue
+		}
+		embedCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		vecs, err := s.LLM.Embed(embedCtx, texts)
+		cancel()
+		if err != nil {
+			for _, idx := range indexes {
+				_ = s.Store.MarkAIKBEmbeddingError(context.Background(), adminID, batch[idx].ID, err.Error())
+			}
+			continue
+		}
+		for i, vec := range vecs {
+			if i >= len(indexes) {
+				break
+			}
+			item := batch[indexes[i]]
+			if len(vec) == 0 {
+				_ = s.Store.MarkAIKBEmbeddingError(context.Background(), adminID, item.ID, "embedding provider returned no vector")
+				continue
+			}
+			if err := s.Store.SetAIKBEmbedding(context.Background(), adminID, item.ID, s.LLM.EmbeddingModel(), vec); err != nil {
+				_ = s.Store.MarkAIKBEmbeddingError(context.Background(), adminID, item.ID, err.Error())
+			}
+		}
+	}
+}
+
+func (s *Server) embedAIKnowledgeChunk(ctx context.Context, adminID, chunkID int64, title, content string) {
+	s.embedAIKnowledgeChunks(ctx, adminID, []aiKBEmbeddingInput{{ID: chunkID, Title: title, Content: content}})
+}
+
 // GenerateKBFromText handles POST /ai/kb/generate-from-text.
 //
 // Long documents are processed in two stages: a local overlapping
@@ -663,6 +764,7 @@ func (s *Server) GenerateKBFromText(w http.ResponseWriter, r *http.Request) {
 
 		createdIDs := make([]int64, 0, len(proposed))
 		titles := make([]string, 0, len(proposed))
+		embeddingInputs := make([]aiKBEmbeddingInput, 0, len(proposed))
 		for _, p := range proposed {
 			content := p.Content
 			if content == "" {
@@ -696,12 +798,14 @@ func (s *Server) GenerateKBFromText(w http.ResponseWriter, r *http.Request) {
 			}
 			createdIDs = append(createdIDs, id)
 			titles = append(titles, title)
+			embeddingInputs = append(embeddingInputs, aiKBEmbeddingInput{ID: id, Title: title, Content: content})
 		}
 
 		if len(createdIDs) == 0 {
 			writeErr(w, http.StatusUnprocessableEntity, "all proposed chunks were empty after validation")
 			return
 		}
+		s.embedAIKnowledgeChunks(ctx, uid, embeddingInputs)
 
 		email := middleware.Email(r)
 		audit.Log(ctx, s.Store.DB, audit.Entry{
@@ -769,6 +873,7 @@ func (s *Server) GenerateKBFromText(w http.ResponseWriter, r *http.Request) {
 	// 3. Validate + sanitise each proposed chunk, then persist.
 	created := make([]int64, 0, len(proposed))
 	titles := make([]string, 0, len(proposed))
+	embeddingInputs := make([]aiKBEmbeddingInput, 0, len(proposed))
 	for _, p := range proposed {
 		content := strings.TrimSpace(p.Content)
 		if content == "" {
@@ -802,12 +907,14 @@ func (s *Server) GenerateKBFromText(w http.ResponseWriter, r *http.Request) {
 		}
 		created = append(created, id)
 		titles = append(titles, title)
+		embeddingInputs = append(embeddingInputs, aiKBEmbeddingInput{ID: id, Title: title, Content: content})
 	}
 
 	if len(created) == 0 {
 		writeErr(w, http.StatusUnprocessableEntity, "all proposed chunks were empty after validation")
 		return
 	}
+	s.embedAIKnowledgeChunks(ctx, uid, embeddingInputs)
 
 	// 4. One summary audit row.
 	email := middleware.Email(r)
@@ -928,6 +1035,7 @@ func (s *Server) runAIKnowledgeImport(jobID, adminID int64, text, sourceName str
 
 	createdIDs := make([]int64, 0, len(parts))
 	titles := make([]string, 0, len(parts))
+	embeddingInputs := make([]aiKBEmbeddingInput, 0, len(parts))
 	const enrichBatchSize = 8
 	for start := 0; start < len(parts); start += enrichBatchSize {
 		end := start + enrichBatchSize
@@ -969,6 +1077,7 @@ func (s *Server) runAIKnowledgeImport(jobID, adminID int64, text, sourceName str
 			}
 			createdIDs = append(createdIDs, id)
 			titles = append(titles, meta.Title)
+			embeddingInputs = append(embeddingInputs, aiKBEmbeddingInput{ID: id, Title: meta.Title, Content: part})
 			if err := s.Store.UpdateAIKBImportProgress(ctx, adminID, jobID, partIndex+1, len(createdIDs), createdIDs, titles, warnings); err != nil {
 				s.failAIKBImportJob(adminID, jobID, err.Error(), warnings)
 				return
@@ -980,6 +1089,7 @@ func (s *Server) runAIKnowledgeImport(jobID, adminID int64, text, sourceName str
 		s.failAIKBImportJob(adminID, jobID, "no chunks were created", warnings)
 		return
 	}
+	s.embedAIKnowledgeChunks(ctx, adminID, embeddingInputs)
 	if err := s.Store.CompleteAIKBImportJob(ctx, adminID, jobID, len(parts), len(createdIDs), createdIDs, titles, warnings); err != nil {
 		s.failAIKBImportJob(adminID, jobID, err.Error(), warnings)
 		return
@@ -1272,7 +1382,7 @@ func (s *Server) AddAIKnowledge(w http.ResponseWriter, r *http.Request) {
 		SourceType: req.SourceType,
 		Metadata:   map[string]any{"source": "manual"},
 	}
-	id, err := s.Store.AddAIKB(r.Context(), uid, chunk)
+	id, err := s.addAIKnowledgeChunk(r.Context(), uid, chunk)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1317,6 +1427,7 @@ func (s *Server) UpdateAIKnowledge(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "chunk not found")
 		return
 	}
+	s.embedAIKnowledgeChunk(r.Context(), uid, updated.ID, updated.Title, updated.Content)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1377,6 +1488,7 @@ func (s *Server) IngestAIKnowledgeURL(w http.ResponseWriter, r *http.Request) {
 
 	parts := chunkPlainText(text, 3500)
 	chunkIDs := []int64{}
+	embeddingInputs := make([]aiKBEmbeddingInput, 0, len(parts))
 	errors := []string{}
 	for i, part := range parts {
 		chunkTitle := title
@@ -1399,7 +1511,9 @@ func (s *Server) IngestAIKnowledgeURL(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		chunkIDs = append(chunkIDs, id)
+		embeddingInputs = append(embeddingInputs, aiKBEmbeddingInput{ID: id, Title: chunkTitle, Content: part})
 	}
+	s.embedAIKnowledgeChunks(r.Context(), uid, embeddingInputs)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":       pageURL.String(),
@@ -1441,7 +1555,7 @@ func (s *Server) SearchAIKnowledge(w http.ResponseWriter, r *http.Request) {
 		}
 		agentScopeID = &req.AgentID
 	}
-	chunks, err := s.Store.SearchAIKBForAgent(r.Context(), uid, agentScopeID, req.Query, req.TopK)
+	chunks, err := s.searchAIKnowledge(r.Context(), uid, agentScopeID, req.Query, req.TopK)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1747,10 +1861,9 @@ func aiStatusFromEnv() aiStatusResponse {
 	bedrockAWS := (os.Getenv("AWS_ACCESS_KEY_ID") != "" && os.Getenv("AWS_SECRET_ACCESS_KEY") != "") || os.Getenv("AWS_PROFILE") != ""
 	bedrock := bedrockCompat || (os.Getenv("AWS_REGION") != "" && (bedrockBearer || bedrockAWS))
 	otherLLM := os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("DEEPSEEK_API_KEY") != ""
-	openAIFallback := truthyEnv("OPENAI_FALLBACK_ENABLED")
 	return aiStatusResponse{
 		LLMEnabled:         openAI || bedrock || otherLLM,
-		EmbeddingsEnabled:  openAI && (!bedrock || openAIFallback),
+		EmbeddingsEnabled:  openAI,
 		TranscriberEnabled: openAI || os.Getenv("AWS_TRANSCRIBE_REGION") != "",
 	}
 }

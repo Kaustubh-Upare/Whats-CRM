@@ -19,8 +19,8 @@ import { ErrorBox, Spinner } from './ui'
 export default function PhonePreview({
   batchId,
   initialRow,
-  templateName = 'billing_summary_v1',
-  language = 'en',
+  templateName = '',
+  language = '',
   onRowChange,
   className = '',
 }: {
@@ -51,7 +51,7 @@ export default function PhonePreview({
         template_params: string[]
       }
     },
-    enabled: !!batchId,
+    enabled: !!batchId && !!templateName && !!language,
     refetchOnWindowFocus: false,
   })
 
@@ -107,7 +107,23 @@ export default function PhonePreview({
           }}
         >
           <AnimatePresence mode="wait">
-            {q.isLoading ? (
+            {!templateName || !language ? (
+              <motion.div
+                key="missing-template"
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="absolute inset-0 grid place-items-center p-4"
+              >
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-center shadow-sm">
+                  <div className="text-sm font-semibold text-amber-900">Select an active template</div>
+                  <div className="mt-1 text-[11px] leading-snug text-amber-800">
+                    Create or activate a WhatsApp template in Templates, then this preview will show the exact message.
+                  </div>
+                  <a href="/admin/templates" className="mt-2 inline-flex text-[11px] font-semibold text-amber-900 underline">
+                    Open Templates
+                  </a>
+                </div>
+              </motion.div>
+            ) : q.isLoading ? (
               <motion.div
                 key="loading"
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -121,7 +137,7 @@ export default function PhonePreview({
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 className="p-3"
               >
-                <ErrorBox msg={(q.error as any)?.response?.data?.error || (q.error as any)?.message || 'Failed to load preview'} />
+                <ErrorBox msg={previewErrorMessage(q.error)} />
               </motion.div>
             ) : q.data ? (
               <motion.div
@@ -184,6 +200,17 @@ export default function PhonePreview({
       )}
     </div>
   )
+}
+
+function previewErrorMessage(error: unknown): string {
+  const raw = (error as any)?.response?.data?.error || (error as any)?.message || 'Failed to load preview'
+  if (typeof raw === 'string' && raw.startsWith('template not active:')) {
+    return 'This selected template is not active for your workspace. Activate it in Templates or choose another active template.'
+  }
+  if (typeof raw === 'string' && raw.startsWith('template not selected')) {
+    return 'Select an active template from your workspace to preview this message.'
+  }
+  return String(raw)
 }
 
 /* ---------------- Frame + atoms ---------------- */

@@ -91,7 +91,7 @@ export default function AIHumanReview() {
   const error = q.isError ? ((q.error as any)?.response?.data?.error || (q.error as any)?.message || 'Failed to load human review queue') : ''
 
   return (
-    <>
+    <div className="mx-auto w-full max-w-[1320px]">
       <PageHeader
         title="Human Review"
         subtitle="Phones where AI follow-ups need a person: buyer replies, handoffs, failed sends, price questions, complaints, and overdue first touches."
@@ -100,7 +100,7 @@ export default function AIHumanReview() {
             <SecondaryButton onClick={() => q.refetch()}>
               <RefreshCw className={`w-4 h-4 ${q.isFetching ? 'animate-spin' : ''}`} /> Refresh
             </SecondaryButton>
-            <Link to="/admin/ai-followup-crm">
+            <Link to="/admin/ai/ai-followup-crm">
               <SecondaryButton>
                 <Sparkles className="w-4 h-4" /> AI CRM
               </SecondaryButton>
@@ -111,7 +111,7 @@ export default function AIHumanReview() {
 
       {error && <div className="mb-4"><ErrorBox msg={error} /></div>}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 mb-4">
+      <div className="admin-review-metric-grid mb-4">
         <Metric label="Open" value={stats?.open || 0} sub="needs a human look" tone={(stats?.open || 0) > 0 ? 'rose' : 'slate'} />
         <Metric label="Critical" value={stats?.critical || 0} sub="failed, handoff, complaint" tone={(stats?.critical || 0) > 0 ? 'rose' : 'slate'} />
         <Metric label="Buyer replies" value={stats?.buyer_replies || 0} sub="warm conversations" tone="emerald" />
@@ -120,7 +120,7 @@ export default function AIHumanReview() {
       </div>
 
       <div className="admin-card p-3 mb-4">
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)] gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(240px,0.75fr)_minmax(0,1.25fr)] gap-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
@@ -161,7 +161,7 @@ export default function AIHumanReview() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[430px_minmax(0,1fr)] gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-[minmax(280px,340px)_minmax(0,1fr)] xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)] gap-4 items-start">
         <Card hover={false} className="!p-0 overflow-hidden">
           <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
             <div>
@@ -202,7 +202,7 @@ export default function AIHumanReview() {
           resolving={resolveM.isPending}
         />
       </div>
-    </>
+    </div>
   )
 }
 
@@ -211,11 +211,11 @@ function Metric({ label, value, sub, tone }: { label: string; value: number; sub
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`rounded-lg border p-4 ${metricTone(tone)}`}
+      className={`rounded-lg border px-3 py-2.5 ${metricTone(tone)}`}
     >
-      <div className="text-[11px] font-semibold uppercase tracking-wider opacity-75">{label}</div>
-      <div className="mt-2 text-3xl font-semibold tracking-tight">{value.toLocaleString()}</div>
-      <div className="mt-1 text-xs opacity-75">{sub}</div>
+      <div className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tracking-tight">{value.toLocaleString()}</div>
+      <div className="mt-0.5 text-[11px] opacity-75 line-clamp-1">{sub}</div>
     </motion.div>
   )
 }

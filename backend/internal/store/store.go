@@ -552,6 +552,8 @@ func (s *Store) FindAdminByVerifyToken(ctx context.Context, encKey []byte, token
 	rows, err := s.DB.Query(ctx, `
 		SELECT admin_user_id, verify_token_enc, verify_token_nonce
 		FROM bc_whatsapp_credentials
+		WHERE removed_at IS NULL
+		ORDER BY is_verified DESC, verified_at DESC NULLS LAST, updated_at DESC
 	`)
 	if err != nil {
 		return 0, err
@@ -587,7 +589,12 @@ func (s *Store) FindAdminByPhoneNumberID(ctx context.Context, phoneID string) (i
 	}
 	var id int64
 	err := s.DB.QueryRow(ctx,
-		`SELECT admin_user_id FROM bc_whatsapp_credentials WHERE phone_number_id=$1 LIMIT 1`,
+		`SELECT admin_user_id
+		   FROM bc_whatsapp_credentials
+		  WHERE phone_number_id=$1
+		    AND removed_at IS NULL
+		  ORDER BY is_verified DESC, verified_at DESC NULLS LAST, updated_at DESC
+		  LIMIT 1`,
 		phoneID,
 	).Scan(&id)
 	if err == pgx.ErrNoRows {
@@ -604,6 +611,7 @@ func (s *Store) ListVerifiedAdminIDs(ctx context.Context) ([]int64, error) {
 	rows, err := s.DB.Query(ctx, `
 		SELECT admin_user_id FROM bc_whatsapp_credentials
 		WHERE is_verified = TRUE
+		  AND removed_at IS NULL
 		ORDER BY verified_at DESC NULLS LAST, updated_at DESC
 	`)
 	if err != nil {
@@ -2501,23 +2509,85 @@ func previewFromParams(j *models.MessageJob) string {
 // ListConversations groups bc_message_jobs by retailer_id (with a phone-only
 // fallback for unlinked messages) and returns one row per group, newest first.
 func (s *Store) ListConversations(ctx context.Context, adminUserID int64, search string, limit, offset int) ([]models.Conversation, int, error) {
-	where := `WHERE j.admin_user_id = $1`
 	args := []any{adminUserID}
+	searchWhere := ""
 	if search != "" {
 		args = append(args, "%"+search+"%")
 		idx := itoa(len(args))
-		where += ` AND (r.retailer_name ILIKE $` + idx + ` OR j.to_number ILIKE $` + idx + `)`
+		searchWhere = `WHERE retailer_name ILIKE $` + idx + ` OR phone ILIKE $` + idx
 	}
 
-	var total int
-	if err := s.DB.QueryRow(ctx, `
-		SELECT COUNT(*) FROM (
-			SELECT 1
+	conversationListCTE := `
+		WITH source_rows AS (
+			SELECT
+				j.to_number AS phone,
+				j.retailer_id,
+				COALESCE(j.sent_at, j.delivered_at, j.read_at, j.failed_at, j.queued_at, j.created_at) AS occurred_at,
+				1::int AS msg_count,
+				(j.status = 'failed') AS has_failed
 			FROM bc_message_jobs j
-			LEFT JOIN bc_retailers r ON r.id = j.retailer_id
-			`+where+`
-			GROUP BY COALESCE(j.retailer_id, -j.id), j.to_number
-		) t
+			WHERE j.admin_user_id = $1
+			  AND trim(COALESCE(j.to_number, '')) <> ''
+
+			UNION ALL
+
+			SELECT
+				st.phone,
+				st.retailer_id,
+				COALESCE(st.last_message_at, st.updated_at, st.started_at) AS occurred_at,
+				0::int AS msg_count,
+				FALSE AS has_failed
+			FROM bc_ai_conversation_states st
+			WHERE st.admin_user_id = $1
+			  AND trim(COALESCE(st.phone, '')) <> ''
+
+			UNION ALL
+
+			SELECT
+				m.phone,
+				NULL::bigint AS retailer_id,
+				m.created_at AS occurred_at,
+				1::int AS msg_count,
+				(m.send_status = 'failed') AS has_failed
+			FROM bc_ai_conversation_messages m
+			WHERE m.admin_user_id = $1
+			  AND trim(COALESCE(m.phone, '')) <> ''
+		),
+		grouped AS (
+			SELECT
+				phone,
+				MAX(retailer_id) FILTER (WHERE retailer_id IS NOT NULL) AS retailer_id,
+				MAX(occurred_at) AS last_at,
+				SUM(msg_count)::int AS cnt,
+				BOOL_OR(has_failed) AS has_failed
+			FROM source_rows
+			GROUP BY phone
+		),
+		named AS (
+			SELECT
+				grouped.retailer_id,
+				grouped.phone,
+				COALESCE(r.retailer_name, rp.retailer_name, '(unknown)') AS retailer_name,
+				grouped.last_at,
+				grouped.cnt,
+				grouped.has_failed
+			FROM grouped
+			LEFT JOIN bc_retailers r ON r.id = grouped.retailer_id
+			LEFT JOIN LATERAL (
+				SELECT rr.retailer_name
+				FROM bc_retailers rr
+				WHERE rr.admin_user_id = $1
+				  AND regexp_replace(rr.whatsapp_number, '[^0-9]', '', 'g') = regexp_replace(grouped.phone, '[^0-9]', '', 'g')
+				ORDER BY rr.id DESC
+				LIMIT 1
+			) rp ON grouped.retailer_id IS NULL
+		)
+	`
+
+	var total int
+	if err := s.DB.QueryRow(ctx, conversationListCTE+`
+		SELECT COUNT(*) FROM named
+		`+searchWhere+`
 	`, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -2525,18 +2595,10 @@ func (s *Store) ListConversations(ctx context.Context, adminUserID int64, search
 	args = append(args, limit, offset)
 	limitIdx := itoa(len(args) - 1)
 	offsetIdx := itoa(len(args))
-	rows, err := s.DB.Query(ctx, `
-		SELECT
-			j.retailer_id,
-			j.to_number,
-			COALESCE(r.retailer_name, '(unknown)'),
-			MAX(COALESCE(j.sent_at, j.delivered_at, j.read_at, j.failed_at, j.queued_at, j.created_at)) AS last_at,
-			COUNT(*)::int AS cnt,
-			BOOL_OR(j.status = 'failed') AS has_failed
-		FROM bc_message_jobs j
-		LEFT JOIN bc_retailers r ON r.id = j.retailer_id
-		`+where+`
-		GROUP BY j.retailer_id, j.to_number, r.retailer_name
+	rows, err := s.DB.Query(ctx, conversationListCTE+`
+		SELECT retailer_id, phone, retailer_name, last_at, cnt, has_failed
+		FROM named
+		`+searchWhere+`
 		ORDER BY last_at DESC
 		LIMIT $`+limitIdx+` OFFSET $`+offsetIdx+`
 	`, args...)
@@ -2588,6 +2650,15 @@ func (s *Store) ListConversations(ctx context.Context, adminUserID int64, search
 			c.LastStatus = "received"
 			c.LastDirection = "inbound"
 			c.LastPreview = trimPreview(inbound.Body)
+		}
+		if humanCount, localPreview, localAt, err := s.aiConversationLocalStats(ctx, adminUserID, "phone:"+c.Phone); err == nil {
+			c.MessageCount += humanCount
+			if localAt != nil && localAt.After(c.LastMessageAt) {
+				c.LastMessageAt = *localAt
+				c.LastStatus = "ai"
+				c.LastDirection = "outbound"
+				c.LastPreview = localPreview
+			}
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -2647,7 +2718,7 @@ func (s *Store) latestInboundForPhone(ctx context.Context, adminUserID int64, ph
 		SELECT COALESCE(e.reason_text, '') AS body, e.occurred_at
 		FROM bc_message_status_events e
 		JOIN bc_message_jobs j ON j.id = e.message_job_id
-		WHERE j.retailer_id IS NULL AND j.to_number = $1
+		WHERE j.to_number = $1
 		  AND j.admin_user_id=$2
 		  AND e.status = 'received'
 		ORDER BY e.occurred_at DESC
@@ -2723,7 +2794,7 @@ func (s *Store) latestJobForPhone(ctx context.Context, adminUserID int64, phone 
 		       attempts, max_attempts, last_error, provider_msg_id,
 		       queued_at, sent_at, delivered_at, read_at, failed_at, created_at
 		FROM bc_message_jobs
-		WHERE retailer_id IS NULL AND to_number=$1
+		WHERE to_number=$1
 		  AND admin_user_id=$2
 		ORDER BY COALESCE(sent_at, delivered_at, read_at, failed_at, queued_at, created_at) DESC
 		LIMIT 1`, phone, adminUserID,
@@ -2973,7 +3044,7 @@ func (s *Store) ListConversationMessagesByPhone(ctx context.Context, adminUserID
 		FROM bc_message_jobs j
 		LEFT JOIN bc_billing_records br ON br.id = j.billing_record_id
 		LEFT JOIN bc_templates t ON t.name = j.template_name AND t.language_code = j.language_code
-		WHERE j.retailer_id IS NULL AND j.to_number = $1
+		WHERE j.to_number = $1
 		  AND j.admin_user_id=$2
 		  AND j.status <> 'received'
 		  AND j.batch_id <> 0
@@ -3026,7 +3097,7 @@ func (s *Store) ListConversationMessagesByPhone(ctx context.Context, adminUserID
 		       e.status, e.occurred_at, e.provider_msg_id
 		FROM bc_message_status_events e
 		JOIN bc_message_jobs j ON j.id = e.message_job_id
-		WHERE j.retailer_id IS NULL AND j.to_number = $1
+		WHERE j.to_number = $1
 		  AND j.admin_user_id=$2
 		  AND e.status = 'received'
 		ORDER BY e.occurred_at ASC
@@ -3118,20 +3189,25 @@ func (s *Store) CreateOrphanInboundJob(ctx context.Context, adminUserID int64, p
 		}
 	}
 	if retailerID == 0 {
-		var adminArg any
 		if adminUserID > 0 {
-			adminArg = adminUserID
+			err = s.DB.QueryRow(ctx, `
+				INSERT INTO bc_retailers
+					(admin_user_id, retailer_code, whatsapp_number, retailer_name, is_opted_out)
+				VALUES ($1, 'orphan-' || md5($1::text || ':' || $2), $2, '(unknown)', FALSE)
+				ON CONFLICT (admin_user_id, whatsapp_number) WHERE admin_user_id IS NOT NULL
+				DO UPDATE SET
+					whatsapp_number = EXCLUDED.whatsapp_number,
+					updated_at = now()
+				RETURNING id
+			`, adminUserID, phone).Scan(&retailerID)
+		} else {
+			err = s.DB.QueryRow(ctx, `
+				INSERT INTO bc_retailers
+					(retailer_code, whatsapp_number, retailer_name, is_opted_out)
+				VALUES ('orphan-' || md5($1 || ':' || random()::text), $1, '(unknown)', FALSE)
+				RETURNING id
+			`, phone).Scan(&retailerID)
 		}
-		_, err = s.DB.Exec(ctx, `
-			INSERT INTO bc_retailers
-				(admin_user_id, retailer_code, whatsapp_number, retailer_name, is_opted_out)
-			VALUES ($1, 'orphan-' || md5(random()::text), $2, '(unknown)', FALSE)
-			ON CONFLICT (admin_user_id, retailer_code) WHERE admin_user_id IS NOT NULL DO NOTHING
-		`, adminArg, phone)
-		if err != nil {
-			return 0, err
-		}
-		err = s.DB.QueryRow(ctx, `SELECT id FROM bc_retailers WHERE retailer_code='orphan-' || md5(random()::text) LIMIT 1`).Scan(&retailerID)
 		if err != nil {
 			return 0, err
 		}

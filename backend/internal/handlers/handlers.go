@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/whatsyitc/backend/internal/ai/orchestrator"
+	"github.com/whatsyitc/backend/internal/ai/retrieval"
 	"github.com/whatsyitc/backend/internal/auth"
 	"github.com/whatsyitc/backend/internal/config"
 	"github.com/whatsyitc/backend/internal/llm"
@@ -26,6 +27,10 @@ type Server struct {
 	Queue  queue.JobQueue
 	Google *auth.GoogleClient
 	LLM    *llm.Registry
+	// Retriever is the shared KB retrieval path. Admin playground,
+	// manual KB search, and WhatsApp orchestration all use this so
+	// keyword/vector behavior stays consistent.
+	Retriever *retrieval.Retriever
 	// Orch is the AI agent loop (Phase 6). The webhook calls
 	// HandleInbound on every inbound text message; nil-safe (the
 	// webhook no-ops if Orch is unset, e.g. when LLM is disabled).
@@ -62,6 +67,10 @@ func (s *Server) SetSequenceWorker(w *worker.SequenceWorker) {
 // such as the agent test playground.
 func (s *Server) SetLLMRegistry(l *llm.Registry) {
 	s.LLM = l
+}
+
+func (s *Server) SetRetriever(r *retrieval.Retriever) {
+	s.Retriever = r
 }
 
 type oauthStateEntry struct {

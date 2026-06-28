@@ -127,6 +127,9 @@ func (p *BedrockProvider) resolveModel(model string) string {
 // Chat is the non-streaming convenience method.
 func (p *BedrockProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	input := p.buildConverseInput(req)
+	if len(input.Messages) == 0 {
+		return nil, errors.New("bedrock: at least one user or assistant message is required")
+	}
 	resp, err := p.client.Converse(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock converse: %w", err)
@@ -164,6 +167,9 @@ func (p *BedrockProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespo
 // Stream returns a buffered channel of typed events.
 func (p *BedrockProvider) Stream(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error) {
 	input := p.buildConverseStreamInput(req)
+	if len(input.Messages) == 0 {
+		return nil, errors.New("bedrock: at least one user or assistant message is required")
+	}
 	resp, err := p.client.ConverseStream(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock converse stream: %w", err)
@@ -267,7 +273,7 @@ func (p *BedrockProvider) buildConverseInput(req ChatRequest) *bedrockruntime.Co
 	return &bedrockruntime.ConverseInput{
 		ModelId:         aws.String(p.modelIDFor(req.Model)),
 		System:          p.buildSystemBlocks(req.System),
-		Messages:        p.buildMessages(req.Messages),
+		Messages:        p.buildInputMessages(req),
 		InferenceConfig: p.buildInferenceConfig(req.Temperature, req.MaxTokens),
 		ToolConfig:      p.buildToolConfig(req.Tools),
 	}
@@ -279,7 +285,7 @@ func (p *BedrockProvider) buildConverseStreamInput(req ChatRequest) *bedrockrunt
 	return &bedrockruntime.ConverseStreamInput{
 		ModelId:         aws.String(p.modelIDFor(req.Model)),
 		System:          p.buildSystemBlocks(req.System),
-		Messages:        p.buildMessages(req.Messages),
+		Messages:        p.buildInputMessages(req),
 		InferenceConfig: p.buildInferenceConfig(req.Temperature, req.MaxTokens),
 		ToolConfig:      p.buildToolConfig(req.Tools),
 	}
@@ -324,6 +330,26 @@ func (p *BedrockProvider) buildInferenceConfig(temp float64, maxTokens int) *brt
 // legacy Backend/ version has the same behavior — image content is
 // stored in metadata and the agent asks the customer to describe it).
 // Phase 7 will fetch the bytes and use ImageBlock.Bytes.
+func (p *BedrockProvider) buildInputMessages(req ChatRequest) []brtypes.Message {
+	msgs := p.buildMessages(req.Messages)
+	if len(msgs) > 0 {
+		return msgs
+	}
+	if strings.TrimSpace(req.System) == "" {
+		return nil
+	}
+	return []brtypes.Message{
+		{
+			Role: brtypes.ConversationRoleUser,
+			Content: []brtypes.ContentBlock{
+				&brtypes.ContentBlockMemberText{
+					Value: "Please follow the system instructions and provide the requested response.",
+				},
+			},
+		},
+	}
+}
+
 func (p *BedrockProvider) buildMessages(msgs []Message) []brtypes.Message {
 	if len(msgs) == 0 {
 		return nil
@@ -342,6 +368,21 @@ func (p *BedrockProvider) buildMessages(msgs []Message) []brtypes.Message {
 				},
 			})
 		case RoleAssistant:
+			if tc, ok := toolCallFromTags(m.Tags); ok {
+				out = append(out, brtypes.Message{
+					Role: brtypes.ConversationRoleAssistant,
+					Content: []brtypes.ContentBlock{
+						&brtypes.ContentBlockMemberToolUse{
+							Value: brtypes.ToolUseBlock{
+								ToolUseId: aws.String(tc.ID),
+								Name:      aws.String(tc.Name),
+								Input:     bedrockJSONDocumentObject(tc.Args),
+							},
+						},
+					},
+				})
+				continue
+			}
 			if m.Content == "" {
 				continue
 			}
@@ -352,7 +393,7 @@ func (p *BedrockProvider) buildMessages(msgs []Message) []brtypes.Message {
 				},
 			})
 		case RoleTool:
-			doc := document.NewLazyDocument(json.RawMessage(m.Content))
+			doc := bedrockJSONDocumentObject(json.RawMessage(m.Content))
 			out = append(out, brtypes.Message{
 				Role: brtypes.ConversationRoleUser,
 				Content: []brtypes.ContentBlock{
@@ -369,6 +410,38 @@ func (p *BedrockProvider) buildMessages(msgs []Message) []brtypes.Message {
 		}
 	}
 	return out
+}
+
+func toolCallFromTags(tags map[string]any) (ToolCall, bool) {
+	if len(tags) == 0 {
+		return ToolCall{}, false
+	}
+	switch v := tags["tool_call"].(type) {
+	case ToolCall:
+		return v, strings.TrimSpace(v.ID) != "" && strings.TrimSpace(v.Name) != ""
+	case *ToolCall:
+		if v == nil {
+			return ToolCall{}, false
+		}
+		return *v, strings.TrimSpace(v.ID) != "" && strings.TrimSpace(v.Name) != ""
+	default:
+		return ToolCall{}, false
+	}
+}
+
+func bedrockJSONDocumentObject(raw json.RawMessage) document.Interface {
+	var v any
+	if len(raw) > 0 && json.Unmarshal(raw, &v) == nil {
+		if obj, ok := v.(map[string]any); ok && obj != nil {
+			return document.NewLazyDocument(obj)
+		}
+		return document.NewLazyDocument(map[string]any{"value": v})
+	}
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return document.NewLazyDocument(map[string]any{})
+	}
+	return document.NewLazyDocument(map[string]any{"text": text})
 }
 
 func (p *BedrockProvider) buildToolConfig(tools []ToolDef) *brtypes.ToolConfiguration {

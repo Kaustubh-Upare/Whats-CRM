@@ -395,7 +395,7 @@ export default function Followups() {
                     <span>No AI follow-ups yet.</span>
                     <span className="text-slate-500 dark:text-slate-400">
                       Toggle AI follow-up on a batch from the{' '}
-                      <Link to="/admin/upload" className="text-emerald-600 dark:text-emerald-400 hover:underline">Upload</Link>
+                      <Link to="/admin/messages/bulk/upload" className="text-emerald-600 dark:text-emerald-400 hover:underline">Upload</Link>
                       {' '}page.
                     </span>
                   </span>
@@ -1086,7 +1086,7 @@ function ApproveBatchModal({ batchId, batchLabel, onClose }: { batchId: number; 
             ) : activeTemplates.length === 0 ? (
               <div className="rounded-md border border-amber-200/70 dark:border-amber-400/30 bg-amber-50 dark:bg-amber-500/10 p-3 text-[12px] text-amber-800 dark:text-amber-200">
                 No active templates. Add one at{' '}
-                <Link to="/admin/templates" className="underline font-medium">/admin/templates</Link>{' '}
+                <Link to="/admin/messages/bulk/templates" className="underline font-medium">/admin/messages/bulk/templates</Link>{' '}
                 first.
               </div>
             ) : (

@@ -1,6 +1,6 @@
 // cmd/seed bootstraps the first admin user and a default template.
 //
-//   go run ./cmd/seed --email admin@your-domain.com --password 'YOUR_PASSWORD' --name "Your Admin"
+//	go run ./cmd/seed --email admin@your-domain.com --password 'YOUR_PASSWORD' --name "Your Admin"
 //
 // Idempotent: re-running with the same email updates the password hash.
 // Honours BC_BCRYPT_COST from env (defaults to 10).
@@ -20,7 +20,7 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
+	loadEnvOverrides()
 
 	email := flag.String("email", "admin@whatsyitc.local", "admin email")
 	password := flag.String("password", "admin123", "admin password")
@@ -114,4 +114,14 @@ func main() {
 		}
 	}
 	log.Printf("[seed] admin_user_id backfill complete (legacy NULL rows now owned by first admin)")
+}
+
+func loadEnvOverrides() {
+	for _, path := range []string{"backend/.env", ".env"} {
+		if _, err := os.Stat(path); err == nil {
+			_ = godotenv.Overload(path)
+			return
+		}
+	}
+	_ = godotenv.Load()
 }

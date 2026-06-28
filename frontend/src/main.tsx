@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
 import App from './App'
 import { ThemeProvider } from './lib/theme'
+import { WorkspaceProvider } from './lib/workspace'
 import './index.css'
 
 const qc = new QueryClient({
@@ -20,12 +21,14 @@ const qc = new QueryClient({
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider>
-      <QueryClientProvider client={qc}>
-        <BrowserRouter>
-          <App />
-          <Toaster position="top-right" />
-        </BrowserRouter>
-      </QueryClientProvider>
+      <WorkspaceProvider>
+        <QueryClientProvider client={qc}>
+          <BrowserRouter>
+            <App />
+            <Toaster position="top-right" />
+          </BrowserRouter>
+        </QueryClientProvider>
+      </WorkspaceProvider>
     </ThemeProvider>
   </React.StrictMode>,
 )

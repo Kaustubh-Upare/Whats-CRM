@@ -411,10 +411,10 @@ export default function Dashboard() {
               Quick actions
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <QuickAction to="/admin/upload"    icon={UploadCloud} title="Upload batch"  desc="Excel / CSV" />
-              <QuickAction to="/admin/batches"   icon={Layers}      title="Batches"       desc="Manage sends" />
-              <QuickAction to="/admin/templates" icon={FileText}    title="Templates"     desc="WA templates" />
-              <QuickAction to="/admin/reports"   icon={TrendingUp}  title="Reports"       desc="Trends · exports" />
+              <QuickAction to="/admin/messages/bulk/upload"    icon={UploadCloud} title="Upload batch"  desc="Excel / CSV" />
+              <QuickAction to="/admin/messages/bulk/batches"   icon={Layers}      title="Batches"       desc="Manage sends" />
+              <QuickAction to="/admin/messages/bulk/templates" icon={FileText}    title="Templates"     desc="WA templates" />
+              <QuickAction to="/admin/messages/bulk/reports"   icon={TrendingUp}  title="Reports"       desc="Trends · exports" />
             </div>
           </div>
 

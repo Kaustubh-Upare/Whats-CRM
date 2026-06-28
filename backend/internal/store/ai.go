@@ -105,6 +105,28 @@ func (s *Store) GetDefaultAIAgentConfig(ctx context.Context, adminID int64) (*mo
 	return cfg, nil
 }
 
+// GetEnabledDefaultAIAgentConfig returns the enabled agent that should run
+// when a batch has no usable override. The configured default wins when it is
+// enabled; otherwise the most recently updated enabled agent is used so a
+// disabled stale default does not stop WhatsApp replies.
+func (s *Store) GetEnabledDefaultAIAgentConfig(ctx context.Context, adminID int64) (*models.AIAgentConfig, error) {
+	cfg := DefaultAIAgentConfig(adminID)
+	err := scanAIAgentRow(s.DB.QueryRow(ctx, `
+		SELECT `+aiAgentSelectColumns+`
+		FROM bc_ai_agents
+		WHERE admin_user_id = $1 AND enabled = TRUE
+		ORDER BY is_default DESC, updated_at DESC, id DESC
+		LIMIT 1
+	`, adminID), cfg)
+	if err == pgx.ErrNoRows {
+		return nil, ErrNoDefaultAgent
+	}
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
 // GetAIAgent fetches one agent by id, admin-scoped. Returns
 // (nil, ErrAgentNotFound) when the row doesn't exist or belongs to a
 // different admin.
@@ -177,6 +199,9 @@ func (s *Store) CreateAIAgent(ctx context.Context, adminID int64, cfg *models.AI
 	handoffRules := jsonObjectString(cfg.HandoffRules)
 	qualificationCriteria := jsonObjectString(cfg.QualificationCriteria)
 	cfg.IsDefault = promoteToDefault
+	if promoteToDefault {
+		cfg.Enabled = true
+	}
 	var id int64
 	err = s.DB.QueryRow(ctx, `
 		INSERT INTO bc_ai_agents
@@ -251,6 +276,21 @@ func (s *Store) UpdateAIAgent(ctx context.Context, adminID, agentID int64, cfg *
 	return s.GetAIAgent(ctx, adminID, agentID)
 }
 
+func (s *Store) EnsureAIAgentEnabled(ctx context.Context, adminID, agentID int64) error {
+	res, err := s.DB.Exec(ctx, `
+		UPDATE bc_ai_agents
+		SET enabled = TRUE
+		WHERE id = $1 AND admin_user_id = $2
+	`, agentID, adminID)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return ErrAgentNotFound
+	}
+	return nil
+}
+
 // DeleteAIAgent removes a non-default agent. Returns ErrCannotDeleteDefault
 // if the agent is the admin's default — the UI must force the operator
 // to pick a different default first. The FK ON DELETE SET NULL on
@@ -318,7 +358,7 @@ func (s *Store) SetDefaultAIAgent(ctx context.Context, adminID, agentID int64) (
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE bc_ai_agents SET is_default = TRUE
+		UPDATE bc_ai_agents SET is_default = TRUE, enabled = TRUE
 		WHERE id = $1 AND admin_user_id = $2
 	`, agentID, adminID); err != nil {
 		return nil, err
@@ -351,16 +391,18 @@ func (s *Store) GetEffectiveAgent(ctx context.Context, adminID int64, batchID *i
 		}
 		if err == nil && agentID != nil {
 			cfg, gerr := s.GetAIAgent(ctx, adminID, *agentID)
-			if gerr == nil {
+			if gerr == nil && cfg.Enabled {
 				return cfg, "batch_override", nil
 			}
-			// If the assigned agent was deleted, fall through to default.
-			if !errors.Is(gerr, ErrAgentNotFound) {
+			if gerr == nil {
+				// Assigned agent exists but is disabled; fall through to an
+				// enabled default.
+			} else if !errors.Is(gerr, ErrAgentNotFound) {
 				return nil, "", gerr
 			}
 		}
 	}
-	cfg, err := s.GetDefaultAIAgentConfig(ctx, adminID)
+	cfg, err := s.GetEnabledDefaultAIAgentConfig(ctx, adminID)
 	if errors.Is(err, ErrNoDefaultAgent) {
 		return nil, "none", nil
 	}
@@ -465,6 +507,31 @@ func (s *Store) ListAIKB(ctx context.Context, adminID int64, sourceType, search 
 	return items, total, nil
 }
 
+func (s *Store) ListAIKBMissingEmbeddings(ctx context.Context, limit int) ([]models.AIKBChunk, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	rows, err := s.DB.Query(ctx, `
+		SELECT id, admin_user_id, coalesce(title, ''), content, source_type,
+		       coalesce(source_ref, ''), metadata, created_at, updated_at,
+		       char_length(content)
+		FROM bc_ai_kb_chunks
+		WHERE embedding IS NULL
+		  AND length(trim(content)) > 0
+		  AND (
+		    embedding_updated_at IS NULL
+		    OR embedding_updated_at < now() - interval '1 hour'
+		  )
+		ORDER BY updated_at DESC, id DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAIKBRows(rows)
+}
+
 func (s *Store) AddAIKB(ctx context.Context, adminID int64, chunk *models.AIKBChunk) (int64, error) {
 	chunk.Title = strings.TrimSpace(chunk.Title)
 	chunk.Content = strings.TrimSpace(chunk.Content)
@@ -485,7 +552,13 @@ func (s *Store) AddAIKB(ctx context.Context, adminID int64, chunk *models.AIKBCh
 func (s *Store) UpdateAIKB(ctx context.Context, adminID, id int64, title, content string) (*models.AIKBChunk, error) {
 	row := s.DB.QueryRow(ctx, `
 		UPDATE bc_ai_kb_chunks
-		SET title = NULLIF($3, ''), content = $4, updated_at = now()
+		SET title = NULLIF($3, ''),
+		    content = $4,
+		    embedding = NULL,
+		    embedding_model = NULL,
+		    embedding_updated_at = NULL,
+		    embedding_error = NULL,
+		    updated_at = now()
 		WHERE id = $1 AND admin_user_id = $2
 		RETURNING id, admin_user_id, coalesce(title, ''), content, source_type,
 		          coalesce(source_ref, ''), metadata, created_at, updated_at,
@@ -496,6 +569,31 @@ func (s *Store) UpdateAIKB(ctx context.Context, adminID, id int64, title, conten
 		return nil, nil
 	}
 	return chunk, err
+}
+
+func (s *Store) SetAIKBEmbedding(ctx context.Context, adminID, id int64, model string, vector []float32) error {
+	if len(vector) == 0 {
+		return nil
+	}
+	_, err := s.DB.Exec(ctx, `
+		UPDATE bc_ai_kb_chunks
+		SET embedding = $3::vector,
+		    embedding_model = NULLIF($4, ''),
+		    embedding_updated_at = now(),
+		    embedding_error = NULL
+		WHERE id = $1 AND admin_user_id = $2
+	`, id, adminID, pgVectorLiteral(vector), strings.TrimSpace(model))
+	return err
+}
+
+func (s *Store) MarkAIKBEmbeddingError(ctx context.Context, adminID, id int64, message string) error {
+	_, err := s.DB.Exec(ctx, `
+		UPDATE bc_ai_kb_chunks
+		SET embedding_error = NULLIF($3, ''),
+		    embedding_updated_at = now()
+		WHERE id = $1 AND admin_user_id = $2
+	`, id, adminID, truncateStoreString(strings.TrimSpace(message), 1000))
+	return err
 }
 
 func (s *Store) DeleteAIKB(ctx context.Context, adminID, id int64) (bool, error) {
@@ -911,10 +1009,10 @@ func (s *Store) ListAIConversationMessages(ctx context.Context, adminID, id int6
 
 	out := []models.AIConversationMessage{}
 	var thread []models.ThreadMessage
-	if st.RetailerID != nil {
-		thread, err = s.ListConversationMessages(ctx, adminID, *st.RetailerID, 1000, 0)
-	} else {
+	if strings.TrimSpace(st.Phone) != "" {
 		thread, err = s.ListConversationMessagesByPhone(ctx, adminID, st.Phone, 1000, 0)
+	} else if st.RetailerID != nil {
+		thread, err = s.ListConversationMessages(ctx, adminID, *st.RetailerID, 1000, 0)
 	}
 	if err != nil {
 		return nil, err
@@ -955,7 +1053,7 @@ func (s *Store) ListAIConversationMessages(ctx context.Context, adminID, id int6
 		}
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
-	return out, nil
+	return dedupeAIConversationMessages(out), nil
 }
 
 func (s *Store) SetAIConversationStatus(ctx context.Context, adminID, id int64, status, reason string) (*models.AIConversation, error) {
@@ -1062,22 +1160,59 @@ func (s *Store) MarkAIConversationHumanMessageSendResult(ctx context.Context, ad
 
 func (s *Store) listAIConversationRaw(ctx context.Context, adminID int64) ([]aiConversationRaw, error) {
 	rows, err := s.DB.Query(ctx, `
+		WITH source_rows AS (
+			SELECT
+				j.to_number AS phone,
+				j.retailer_id,
+				CASE WHEN j.status <> 'received' THEN 1 ELSE 0 END::int AS ai_count,
+				COALESCE(j.sent_at, j.delivered_at, j.read_at, j.failed_at, j.queued_at, j.created_at) AS occurred_at
+			FROM bc_message_jobs j
+			WHERE j.admin_user_id = $1
+			  AND trim(COALESCE(j.to_number, '')) <> ''
+
+			UNION ALL
+
+			SELECT
+				st.phone,
+				st.retailer_id,
+				0::int AS ai_count,
+				COALESCE(st.last_message_at, st.updated_at, st.started_at) AS occurred_at
+			FROM bc_ai_conversation_states st
+			WHERE st.admin_user_id = $1
+			  AND trim(COALESCE(st.phone, '')) <> ''
+
+			UNION ALL
+
+			SELECT
+				m.phone,
+				NULL::bigint AS retailer_id,
+				CASE WHEN m.role IN ('assistant', 'human') THEN 1 ELSE 0 END::int AS ai_count,
+				m.created_at AS occurred_at
+			FROM bc_ai_conversation_messages m
+			WHERE m.admin_user_id = $1
+			  AND trim(COALESCE(m.phone, '')) <> ''
+		),
+		grouped AS (
+			SELECT
+				phone AS to_number,
+				MAX(retailer_id) FILTER (WHERE retailer_id IS NOT NULL) AS retailer_id,
+				SUM(ai_count)::int AS ai_count,
+				MIN(occurred_at) AS started_at,
+				MAX(occurred_at) AS last_at
+			FROM source_rows
+			GROUP BY phone
+		)
 		SELECT
-			CASE
-				WHEN j.retailer_id IS NOT NULL THEN 'retailer:' || j.retailer_id::text
-				ELSE 'phone:' || j.to_number
-			END AS conversation_key,
-			j.retailer_id,
-			j.to_number,
+			'phone:' || grouped.to_number AS conversation_key,
+			grouped.retailer_id,
+			grouped.to_number,
 			COALESCE(r.retailer_name, ''),
-			COUNT(*) FILTER (WHERE j.status <> 'received')::int AS ai_count,
-			MIN(COALESCE(j.sent_at, j.delivered_at, j.read_at, j.failed_at, j.queued_at, j.created_at)) AS started_at,
-			MAX(COALESCE(j.sent_at, j.delivered_at, j.read_at, j.failed_at, j.queued_at, j.created_at)) AS last_at
-		FROM bc_message_jobs j
-		LEFT JOIN bc_retailers r ON r.id = j.retailer_id
-		WHERE j.admin_user_id = $1
-		GROUP BY conversation_key, j.retailer_id, j.to_number, r.retailer_name
-		ORDER BY last_at DESC
+			grouped.ai_count,
+			grouped.started_at,
+			grouped.last_at
+		FROM grouped
+		LEFT JOIN bc_retailers r ON r.id = grouped.retailer_id
+		ORDER BY grouped.last_at DESC
 		LIMIT 500
 	`, adminID)
 	if err != nil {
@@ -1105,12 +1240,12 @@ func (s *Store) fillAIConversationPreview(ctx context.Context, adminID int64, ra
 		inbound *inboundPreview
 		err     error
 	)
-	if raw.RetailerID != nil {
-		j, err = s.latestJobForRetailer(ctx, adminID, *raw.RetailerID)
-		inbound, _ = s.latestInboundForRetailer(ctx, adminID, *raw.RetailerID)
-	} else {
+	if strings.TrimSpace(raw.Phone) != "" {
 		j, err = s.latestJobForPhone(ctx, adminID, raw.Phone)
 		inbound, _ = s.latestInboundForPhone(ctx, adminID, raw.Phone)
+	} else if raw.RetailerID != nil {
+		j, err = s.latestJobForRetailer(ctx, adminID, *raw.RetailerID)
+		inbound, _ = s.latestInboundForRetailer(ctx, adminID, *raw.RetailerID)
 	}
 	if err != nil {
 		return err
@@ -1179,32 +1314,65 @@ func scanAIConversationState(row rowScanner) (*aiConversationState, error) {
 }
 
 func (s *Store) aiConversationRawForState(ctx context.Context, st *aiConversationState) (*aiConversationRaw, error) {
-	where := "j.admin_user_id = $1 AND j.retailer_id = $2"
-	arg2 := any(int64(0))
-	if st.RetailerID != nil {
-		arg2 = *st.RetailerID
-	} else {
-		where = "j.admin_user_id = $1 AND j.retailer_id IS NULL AND j.to_number = $2"
-		arg2 = st.Phone
+	phone := strings.TrimSpace(st.Phone)
+	if phone == "" {
+		return nil, nil
 	}
 
 	row := s.DB.QueryRow(ctx, `
+		WITH source_rows AS (
+			SELECT
+				j.to_number AS phone,
+				j.retailer_id,
+				CASE WHEN j.status <> 'received' THEN 1 ELSE 0 END::int AS ai_count,
+				COALESCE(j.sent_at, j.delivered_at, j.read_at, j.failed_at, j.queued_at, j.created_at) AS occurred_at
+			FROM bc_message_jobs j
+			WHERE j.admin_user_id = $1
+			  AND j.to_number = $2
+
+			UNION ALL
+
+			SELECT
+				st.phone,
+				st.retailer_id,
+				0::int AS ai_count,
+				COALESCE(st.last_message_at, st.updated_at, st.started_at) AS occurred_at
+			FROM bc_ai_conversation_states st
+			WHERE st.admin_user_id = $1
+			  AND st.phone = $2
+
+			UNION ALL
+
+			SELECT
+				m.phone,
+				NULL::bigint AS retailer_id,
+				CASE WHEN m.role IN ('assistant', 'human') THEN 1 ELSE 0 END::int AS ai_count,
+				m.created_at AS occurred_at
+			FROM bc_ai_conversation_messages m
+			WHERE m.admin_user_id = $1
+			  AND m.phone = $2
+		),
+		grouped AS (
+			SELECT
+				phone AS to_number,
+				MAX(retailer_id) FILTER (WHERE retailer_id IS NOT NULL) AS retailer_id,
+				SUM(ai_count)::int AS ai_count,
+				MIN(occurred_at) AS started_at,
+				MAX(occurred_at) AS last_at
+			FROM source_rows
+			GROUP BY phone
+		)
 		SELECT
-			CASE
-				WHEN j.retailer_id IS NOT NULL THEN 'retailer:' || j.retailer_id::text
-				ELSE 'phone:' || j.to_number
-			END AS conversation_key,
-			j.retailer_id,
-			j.to_number,
+			'phone:' || grouped.to_number AS conversation_key,
+			grouped.retailer_id,
+			grouped.to_number,
 			COALESCE(r.retailer_name, ''),
-			COUNT(*) FILTER (WHERE j.status <> 'received')::int AS ai_count,
-			MIN(COALESCE(j.sent_at, j.delivered_at, j.read_at, j.failed_at, j.queued_at, j.created_at)) AS started_at,
-			MAX(COALESCE(j.sent_at, j.delivered_at, j.read_at, j.failed_at, j.queued_at, j.created_at)) AS last_at
-		FROM bc_message_jobs j
-		LEFT JOIN bc_retailers r ON r.id = j.retailer_id
-		WHERE `+where+`
-		GROUP BY conversation_key, j.retailer_id, j.to_number, r.retailer_name
-	`, st.AdminUserID, arg2)
+			grouped.ai_count,
+			grouped.started_at,
+			grouped.last_at
+		FROM grouped
+		LEFT JOIN bc_retailers r ON r.id = grouped.retailer_id
+	`, st.AdminUserID, phone)
 
 	var raw aiConversationRaw
 	if err := row.Scan(&raw.ConversationKey, &raw.RetailerID, &raw.Phone, &raw.LeadName, &raw.AIHandledCount, &raw.StartedAt, &raw.LastMessageAt); err != nil {
@@ -1307,6 +1475,31 @@ func (s *Store) listLocalAIConversationMessages(ctx context.Context, adminID int
 		out = append(out, *m)
 	}
 	return out, rows.Err()
+}
+
+func dedupeAIConversationMessages(items []models.AIConversationMessage) []models.AIConversationMessage {
+	if len(items) < 2 {
+		return items
+	}
+	out := make([]models.AIConversationMessage, 0, len(items))
+	for _, item := range items {
+		duplicate := false
+		content := strings.TrimSpace(item.Content)
+		for i := len(out) - 1; i >= 0; i-- {
+			prev := out[i]
+			if item.CreatedAt.Sub(prev.CreatedAt) > 10*time.Second {
+				break
+			}
+			if prev.Role == item.Role && strings.TrimSpace(prev.Content) == content {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func scanLocalAIConversationMessage(row rowScanner) (*models.AIConversationMessage, error) {
@@ -1536,4 +1729,25 @@ func keywordScore(terms []string, title, sourceRef, content string) float64 {
 	base := float64(matches) / float64(len(terms))
 	titleBoost := 0.15 * (float64(titleMatches) / float64(len(terms)))
 	return math.Min(1, base+titleBoost)
+}
+
+func pgVectorLiteral(v []float32) string {
+	var b strings.Builder
+	b.Grow(2 + len(v)*12)
+	b.WriteByte('[')
+	for i, x := range v {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "%g", x)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+func truncateStoreString(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return s[:max]
 }

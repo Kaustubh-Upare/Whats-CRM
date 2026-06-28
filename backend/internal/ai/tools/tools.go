@@ -143,17 +143,28 @@ func (t *CaptureLead) Execute(ctx context.Context, adminID int64, call llm.ToolC
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		return ToolResult{}, fmt.Errorf("capture_lead: bad args: %w", err)
 	}
+	args.Phone = strings.TrimSpace(args.Phone)
+	args.Name = strings.TrimSpace(args.Name)
+	args.Email = strings.TrimSpace(args.Email)
+	args.Interest = strings.TrimSpace(args.Interest)
+	args.Budget = strings.TrimSpace(args.Budget)
+	args.Timeline = strings.TrimSpace(args.Timeline)
+	args.Location = strings.TrimSpace(args.Location)
 	if args.Phone == "" {
 		return ToolResult{}, fmt.Errorf("capture_lead: phone is required")
+	}
+	displayName := args.Name
+	if displayName == "" {
+		displayName = fallbackLeadName(args.Phone)
 	}
 
 	// Upsert lead (unique on admin_user_id + phone).
 	var leadID int64
 	err := t.pool.QueryRow(ctx, `
 		INSERT INTO bc_ai_leads (admin_user_id, phone, name, email, interest, budget, timeline, location, source)
-		VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), 'whatsapp_ai')
+		VALUES ($1, $2, $9, COALESCE(NULLIF($4,''), ''), COALESCE(NULLIF($5,''), ''), COALESCE(NULLIF($6,''), ''), COALESCE(NULLIF($7,''), ''), COALESCE(NULLIF($8,''), ''), 'whatsapp_ai')
 		ON CONFLICT (admin_user_id, phone) DO UPDATE
-		  SET name = COALESCE(NULLIF(EXCLUDED.name, ''), bc_ai_leads.name),
+		  SET name = COALESCE(NULLIF($3, ''), bc_ai_leads.name),
 		      email = COALESCE(NULLIF(EXCLUDED.email, ''), bc_ai_leads.email),
 		      interest = COALESCE(NULLIF(EXCLUDED.interest, ''), bc_ai_leads.interest),
 		      budget = COALESCE(NULLIF(EXCLUDED.budget, ''), bc_ai_leads.budget),
@@ -161,7 +172,7 @@ func (t *CaptureLead) Execute(ctx context.Context, adminID int64, call llm.ToolC
 		      location = COALESCE(NULLIF(EXCLUDED.location, ''), bc_ai_leads.location),
 		      updated_at = now()
 		RETURNING id
-	`, adminID, args.Phone, args.Name, args.Email, args.Interest, args.Budget, args.Timeline, args.Location).Scan(&leadID)
+	`, adminID, args.Phone, args.Name, args.Email, args.Interest, args.Budget, args.Timeline, args.Location, displayName).Scan(&leadID)
 	if err != nil {
 		return ToolResult{}, fmt.Errorf("capture_lead: upsert lead: %w", err)
 	}
@@ -198,11 +209,22 @@ func (t *CaptureLead) Execute(ctx context.Context, adminID int64, call llm.ToolC
 	}
 	content, _ := json.Marshal(map[string]any{
 		"lead_id":  leadID,
-		"name":     args.Name,
+		"name":     displayName,
 		"phone":    args.Phone,
 		"interest": args.Interest,
 	})
 	return ToolResult{Content: string(content), Summary: summary}, nil
+}
+
+func fallbackLeadName(phone string) string {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return "WhatsApp lead"
+	}
+	if len(phone) <= 4 {
+		return "WhatsApp lead " + phone
+	}
+	return "WhatsApp lead " + phone[len(phone)-4:]
 }
 
 // ---------------------------------------------------------------------------
@@ -243,8 +265,8 @@ func (t *QualifyLead) Execute(ctx context.Context, adminID int64, call llm.ToolC
 	}
 
 	// Load qualification criteria from the admin's default agent. Phase 8
-// multi-agent: read from bc_ai_agents (the renamed + extended table) and
-// pick the global default so behavior matches what live chat uses.
+	// multi-agent: read from bc_ai_agents (the renamed + extended table) and
+	// pick the global default so behavior matches what live chat uses.
 	var criteriaJSON []byte
 	if err := t.pool.QueryRow(ctx,
 		`SELECT qualification_criteria FROM bc_ai_agents WHERE admin_user_id = $1 AND is_default = TRUE`,

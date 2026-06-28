@@ -417,13 +417,13 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
             <Link to="/admin/ai/followups">
               <SecondaryButton><ArrowLeft className="w-4 h-4" /> AI follow-ups</SecondaryButton>
             </Link>
-            <Link to={`/admin/batches/${batchID}`}>
+            <Link to={`/admin/messages/bulk/batches/${batchID}`}>
               <SecondaryButton><FileText className="w-4 h-4" /> Batch</SecondaryButton>
             </Link>
             <Link to={`/admin/ai/followups/${batchID}/agent`}>
               <SecondaryButton><Bot className="w-4 h-4" /> Agent setup</SecondaryButton>
             </Link>
-            <Link to="/admin/upload">
+            <Link to="/admin/messages/bulk/upload">
               <SecondaryButton><UploadCloud className="w-4 h-4" /> Upload</SecondaryButton>
             </Link>
             {enabled ? (
@@ -453,19 +453,19 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-5 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 items-stretch">
         <Card hover={false} className="!p-0 overflow-hidden">
-          <div className="p-5 border-b border-slate-200 dark:border-white/10">
+          <div className="h-full p-4 border-b border-slate-200 dark:border-white/10 bg-gradient-to-br from-white via-emerald-50/45 to-blue-50/35 dark:from-white/[0.04] dark:via-emerald-500/10 dark:to-blue-500/10">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="min-w-0">
                 <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   <Bot className="w-3.5 h-3.5 text-emerald-500" />
                   Current state
                 </div>
-                <div className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">
+                <div className="mt-1.5 text-lg font-semibold text-slate-900 dark:text-white">
                   {health.title}
                 </div>
-                <div className="mt-1 text-sm text-slate-500 dark:text-slate-400 max-w-2xl">
+                <div className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-400 max-w-2xl">
                   {health.body}
                 </div>
               </div>
@@ -491,12 +491,17 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
 
         </Card>
 
-        <Card hover={false} className="!p-0">
-          <CardHeader
-            title="Agent for this batch"
-            subtitle="Pick which agent handles this batch. Leave unset to use the global default."
-          />
-          <div className="p-5 space-y-4">
+        <Card hover={false} className="!p-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/70 dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <Bot className="w-3.5 h-3.5 text-blue-500" />
+                Agent for this batch
+              </div>
+              <Pill tone={enabled ? 'emerald' : 'slate'}>{enabled ? 'AI enabled' : 'AI off'}</Pill>
+            </div>
+          </div>
+          <div className="p-4 space-y-3">
             <BatchAgentPicker
               batchID={batchID}
               effective={effectiveAgentQ.data ?? null}
@@ -507,20 +512,16 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
                 qc.invalidateQueries({ queryKey: aiKeys.agents() })
               }}
             />
-            <InfoLine icon={<Power className="w-4 h-4" />} label="Batch AI">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Pill tone={enabled ? 'emerald' : 'slate'}>{enabled ? 'Enabled' : 'Disabled'}</Pill>
-                {data?.enabled_at && <span className="text-xs text-slate-500 dark:text-slate-400">since {fmtRelative(data.enabled_at)}</span>}
-              </div>
-            </InfoLine>
-            <InfoLine icon={<FileText className="w-4 h-4" />} label="Source batch">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Link to={`/admin/batches/${batchID}`} className="text-emerald-600 dark:text-emerald-400 hover:underline">
+            <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50/70 px-3 py-2 text-sm dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="min-w-0 flex items-center gap-2 text-slate-600 dark:text-slate-300">
+                <FileText className="w-4 h-4 shrink-0 text-slate-400" />
+                <Link to={`/admin/messages/bulk/batches/${batchID}`} className="text-emerald-600 dark:text-emerald-400 hover:underline">
                   Batch #{batchID}
                 </Link>
                 <span className="text-xs text-slate-500 dark:text-slate-400">{batchStatus || 'unknown'}</span>
               </div>
-            </InfoLine>
+              {data?.enabled_at && <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">{fmtRelative(data.enabled_at)}</span>}
+            </div>
             {enabled && effectiveAgentQ.data?.agent && !effectiveAgentQ.data.agent.enabled && (
               <div className="rounded-lg border border-amber-200 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
                 The resolved agent is disabled. This batch can be tracked, but auto-replies will not run until the agent is enabled.
@@ -530,9 +531,9 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
-        <aside className="xl:sticky xl:top-4 xl:max-h-[calc(100vh-120px)]">
-          <Card hover={false} className="!p-0 overflow-hidden xl:h-[calc(100vh-140px)] xl:min-h-[560px] flex flex-col">
+      <div className="grid grid-cols-1 lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)] gap-4 items-start">
+        <aside className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-118px)]">
+          <Card hover={false} className="!p-0 overflow-hidden lg:h-[calc(100vh-140px)] lg:min-h-[520px] flex flex-col">
             <CardHeader
               title={
                 <span className="inline-flex items-center gap-2">
@@ -560,7 +561,7 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
             />
 
             {enabled && (
-              <div className="shrink-0 border-b border-slate-200 dark:border-white/10 px-3 py-3 space-y-3 bg-slate-50/60 dark:bg-white/[0.02]">
+              <div className="shrink-0 border-b border-slate-200 dark:border-white/10 px-3 py-3 space-y-2.5 bg-slate-50/60 dark:bg-white/[0.02]">
                 <AIFollowupStatusCounts counts={counts} />
                 <StatusFilters value={statusFilter} onChange={setStatusFilter} />
                 <div className="relative">
@@ -616,7 +617,7 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
               )}
 
               {followupQ.isSuccess && enabled && filteredRecipients.length > 0 && (
-                <div className="p-3 space-y-2">
+                <div className="p-2.5 space-y-2">
                   {filteredRecipients.map((r, i) => (
                     <RecipientRailItem
                       key={r.id}
@@ -795,7 +796,7 @@ function RecipientRailItem({
       <button
         type="button"
         onClick={onSelect}
-        className="w-full text-left p-3"
+        className="w-full text-left p-2.5"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -809,10 +810,7 @@ function RecipientRailItem({
           <AIFollowupStatusBadge status={recipient.ai_status} />
         </div>
 
-        <div className="mt-3 rounded-md border border-slate-200/70 bg-slate-50/80 p-2 dark:border-white/10 dark:bg-black/10">
-          <div className="mb-1 text-[10px] font-semibold uppercase text-slate-400 dark:text-slate-500">
-            Last message
-          </div>
+        <div className="mt-2 rounded-md border border-slate-200/70 bg-slate-50/80 p-2 dark:border-white/10 dark:bg-black/10">
           <AIFollowupLastMessage r={recipient} maxWidth={270} />
         </div>
 
@@ -823,7 +821,7 @@ function RecipientRailItem({
         )}
       </button>
 
-      <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2 dark:border-white/10">
+      <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-2.5 py-2 dark:border-white/10">
         <button
           type="button"
           onClick={onSelect}
@@ -885,7 +883,7 @@ function RecipientPanel({
   if (!detail) {
     return (
       <Card hover={false} className="!p-0 min-h-[520px] overflow-hidden">
-        <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
+        <div className="border-b border-slate-200 bg-slate-50/70 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
           <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
             <Bot className="w-3.5 h-3.5 text-emerald-500" />
             AI control room
@@ -912,22 +910,22 @@ function RecipientPanel({
   const timelineCount = timeline.length
 
   return (
-    <div className="space-y-5 min-w-0">
+    <div className="space-y-4 min-w-0">
       <Card hover={false} className="!p-0 overflow-hidden">
-        <div className="border-b border-slate-200 bg-gradient-to-br from-white via-blue-50/45 to-emerald-50/65 px-5 py-5 dark:border-white/10 dark:from-white/[0.06] dark:via-blue-500/10 dark:to-emerald-500/10">
+        <div className="border-b border-slate-200 bg-gradient-to-br from-white via-blue-50/45 to-emerald-50/65 px-4 py-4 dark:border-white/10 dark:from-white/[0.06] dark:via-blue-500/10 dark:to-emerald-500/10">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
                 AI control room
               </div>
-              <div className="mt-2 flex items-center gap-3 flex-wrap">
-                <h2 className="text-2xl font-semibold text-slate-950 dark:text-white">
+              <div className="mt-1.5 flex items-center gap-3 flex-wrap">
+                <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
                   {r.retailer_name || 'Unknown retailer'}
                 </h2>
                 <AIFollowupStatusBadge status={r.ai_status} />
               </div>
-              <div className="mt-2 flex items-center gap-3 flex-wrap text-sm text-slate-600 dark:text-slate-300">
+              <div className="mt-1.5 flex items-center gap-3 flex-wrap text-sm text-slate-600 dark:text-slate-300">
                 <span className="inline-flex items-center gap-1.5 font-mono text-xs">
                   <MessageSquare className="w-3.5 h-3.5 text-blue-500" />
                   {r.whatsapp_number}
@@ -995,7 +993,7 @@ function RecipientPanel({
           <MetricCell label="Cadence" value={f ? `${f.cadence_days} day${f.cadence_days === 1 ? '' : 's'}` : 'Unset'} sub={f ? `${f.max_messages} max messages` : 'No enrollment'} icon={<Clock3 className="w-4 h-4" />} tone="amber" />
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="p-4 space-y-4">
           {latestError && (
             <div className="rounded-lg border border-rose-200 dark:border-rose-400/20 bg-rose-50 dark:bg-rose-500/10 p-3 text-sm text-rose-800 dark:text-rose-200">
               <div className="font-semibold inline-flex items-center gap-2">
@@ -1007,21 +1005,6 @@ function RecipientPanel({
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <InfoLine icon={<UserRound className="w-4 h-4" />} label="Retailer">
-              <div className="space-y-1">
-                <div>{r.retailer_name || 'Unknown retailer'}</div>
-                <div className="font-mono text-xs text-slate-500 dark:text-slate-400">{r.whatsapp_number}</div>
-              </div>
-            </InfoLine>
-            <InfoLine icon={<MessageSquare className="w-4 h-4" />} label="Conversation">
-              {conv ? (
-                <Link to={`/admin/ai/conversations?phone=${encodeURIComponent(r.whatsapp_number)}`} className="text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1">
-                  Open chat <ExternalLink className="w-3 h-3" />
-                </Link>
-              ) : (
-                <span className="text-slate-500 dark:text-slate-400">No conversation yet</span>
-              )}
-            </InfoLine>
             <InfoLine icon={<Route className="w-4 h-4" />} label="Follow-up">
               {f ? (
                 <div className="space-y-1">
@@ -1048,7 +1031,7 @@ function RecipientPanel({
             </InfoLine>
           </div>
 
-          <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_320px] gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-3">
             <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-white/10 dark:bg-white/[0.03]">
               <div className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
                 Current objective
@@ -1097,8 +1080,8 @@ function RecipientPanel({
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_360px] gap-5 items-start">
-        <div className="space-y-5 min-w-0">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">
+        <div className="space-y-4 min-w-0">
           <NextFollowupCard
             detail={detail}
             busy={busy}
@@ -1107,7 +1090,7 @@ function RecipientPanel({
           />
         </div>
 
-        <div className="space-y-5 min-w-0">
+        <div className="space-y-4 min-w-0">
           <AgentPreviewCard
             batchID={detail.recipient.batch_id}
             agent={agent}
@@ -2254,9 +2237,9 @@ function BatchAgentPicker({
   })()
 
   return (
-    <div className="rounded-md border border-slate-200 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] p-4 space-y-3">
+    <div className="rounded-md border border-slate-200 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] p-3 space-y-2.5">
       {/* Resolved row */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap min-h-7">
         <Bot className="w-4 h-4 text-emerald-500" />
         <span className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Resolved</span>
         {isLoading ? (
@@ -2283,15 +2266,15 @@ function BatchAgentPicker({
       </div>
 
       {/* Override picker */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <label className="text-xs font-medium text-slate-700 dark:text-slate-300 w-24 shrink-0">
-          Override
+      <div className="flex items-center gap-2">
+        <label className="text-xs font-medium text-slate-700 dark:text-slate-300 w-16 shrink-0">
+          Agent
         </label>
         <select
           value={selectValue}
           onChange={onChange}
           disabled={apply.isPending || isLoading}
-          className="flex-1 min-w-[200px] px-3 py-2 rounded-md text-sm
+          className="flex-1 min-w-0 px-3 py-2 rounded-md text-sm
                      bg-white dark:bg-[var(--input-bg)]
                      border border-slate-300 dark:border-[var(--input-border)]
                      text-slate-900 dark:text-slate-100

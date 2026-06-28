@@ -264,12 +264,9 @@ function AgentListRow({
         )}
       </div>
       <div className="flex items-center gap-2 mt-1.5">
-        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-          {agent.primary_model}
-        </span>
-        <span className="text-[11px] text-slate-400 dark:text-slate-500">·</span>
-        <span className="text-[11px] text-slate-500 dark:text-slate-400">
-          {agent.tone}
+        <span className="inline-flex items-center gap-1 rounded bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 text-[11px] text-slate-600 dark:text-slate-300">
+          <span className="text-slate-400 dark:text-slate-500">Model</span>
+          <span className="font-mono">{agent.primary_model || 'default'}</span>
         </span>
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           {!agent.is_default && (

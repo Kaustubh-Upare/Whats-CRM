@@ -13,7 +13,7 @@ func TestBuildSystemPromptContainsIdentity(t *testing.T) {
 		Name:         "Riya",
 		Tone:         "friendly",
 		SystemPrompt: "Answer briefly.",
-	}, nil, nil, 17)
+	}, nil, nil, 17, "919168810152")
 	for _, want := range []string{"Riya", "friendly", "Answer briefly.", "17"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing %q\nfull: %s", want, got)
@@ -26,7 +26,7 @@ func TestBuildSystemPromptIncludesKBContext(t *testing.T) {
 		{ID: 7, Title: "Hours", Content: "Mon-Sat 9am-9pm", SourceType: "manual"},
 		{ID: 8, Title: "Location", Content: "MG Road", SourceType: "manual"},
 	}
-	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, nil, chunks, 1)
+	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, nil, chunks, 1, "919168810152")
 	// FormatForPrompt emits "[1] Title — content" or "[1] content".
 	if !strings.Contains(got, "[1]") || !strings.Contains(got, "Mon-Sat") {
 		t.Errorf("prompt missing KB block\nfull: %s", got)
@@ -34,14 +34,14 @@ func TestBuildSystemPromptIncludesKBContext(t *testing.T) {
 }
 
 func TestBuildSystemPromptNoChunksNoBlock(t *testing.T) {
-	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, nil, nil, 1)
+	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, nil, nil, 1, "919168810152")
 	if !strings.Contains(got, "No matching KB entries") {
 		t.Errorf("prompt should explicitly tell the model no KB matched\nfull: %s", got)
 	}
 }
 
 func TestBuildSystemPromptMentionsTools(t *testing.T) {
-	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, nil, nil, 1)
+	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, nil, nil, 1, "919168810152")
 	for _, want := range []string{"capture_lead", "qualify_lead", "transfer_to_human"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt should describe tool %q", want)
@@ -50,13 +50,15 @@ func TestBuildSystemPromptMentionsTools(t *testing.T) {
 }
 
 func TestBuildSystemPromptIncludesRules(t *testing.T) {
-	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, nil, nil, 1)
+	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, nil, nil, 1, "919168810152")
 	for _, want := range []string{
 		"Rules:",
 		"source of truth",
 		"Do NOT answer from memory",
 		"capture_lead",
 		"transfer_to_human",
+		"Never ask for the customer's phone number",
+		"Known WhatsApp phone for this customer: 919168810152",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing rule fragment %q\nfull: %s", want, got)
@@ -94,7 +96,7 @@ func TestClassifyIntent(t *testing.T) {
 // the system prompt). Kept as a regression test for future changes.
 func TestBuildSystemPromptIgnoresHistory(t *testing.T) {
 	history := []llm.Message{{Role: llm.RoleUser, Content: "earlier question"}}
-	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, history, nil, 1)
+	got := BuildSystemPrompt(agentConfigRow{Name: "Riya"}, history, nil, 1, "919168810152")
 	if strings.Contains(got, "earlier question") {
 		t.Errorf("prompt should not include history in system prompt")
 	}

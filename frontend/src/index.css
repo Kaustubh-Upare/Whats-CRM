@@ -465,6 +465,59 @@ body {
 /* Date input controls (Chats / Reports / Settings) — they're `<input
  * type="date">` so Tailwind doesn't have a dedicated class; CSS handles
  * both the date picker icon and the inner text colour. */
+.admin-metric-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+.admin-review-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+}
+.admin-conversation-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+.admin-chat-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  min-height: 0;
+}
+@media (min-width: 640px) {
+  .admin-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .admin-review-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .admin-conversation-split {
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  }
+  .admin-chat-split {
+    grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  }
+}
+@media (min-width: 1024px) {
+  .admin-metric-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .admin-review-metric-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1280px) {
+  .admin-conversation-split {
+    grid-template-columns: 380px minmax(0, 1fr);
+  }
+  .admin-chat-split {
+    grid-template-columns: 360px minmax(0, 1fr);
+  }
+}
+
 .dark .dark-on input[type="date"],
 .dark .dark-on input[type="datetime-local"] {
   color-scheme: dark;

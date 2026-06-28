@@ -94,7 +94,7 @@ export default function Messages() {
                 {list.data.items.map((j) => (
                   <Link
                     key={j.id}
-                    to={`/admin/messages/${j.id}`}
+                    to={`/admin/messages/bulk/messages/${j.id}`}
                     className="block rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[var(--bg-elevated)] p-3 hover:border-emerald-400/50 dark:hover:border-emerald-500/40 transition-colors"
                   >
                     <div className="flex items-start gap-2">
@@ -181,7 +181,7 @@ export default function Messages() {
                                   <RotateCcw className="w-3 h-3" /> Resend
                                 </motion.button>
                               )}
-                              <Link to={`/admin/messages/${j.id}`} className="text-brand-700 hover:underline text-sm">Open →</Link>
+                              <Link to={`/admin/messages/bulk/messages/${j.id}`} className="text-brand-700 hover:underline text-sm">Open →</Link>
                             </div>
                           </Td>
                         </motion.tr>

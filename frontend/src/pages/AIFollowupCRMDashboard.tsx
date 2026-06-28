@@ -247,7 +247,7 @@ export default function AIFollowupCRMDashboard() {
   )
   const lastRefreshAgeSec = lastRefreshMs ? Math.max(0, Math.round((now - lastRefreshMs) / 1000)) : null
   const handleBatchSelect = (id: number) => {
-    navigate(`/admin/ai-followup-crm/${id}`)
+    navigate(`/admin/ai/ai-followup-crm/${id}`)
   }
 
   useEffect(() => {
@@ -255,7 +255,7 @@ export default function AIFollowupCRMDashboard() {
   }, [isBatchPage, routeBatchId])
 
   return (
-    <>
+    <div className="mx-auto w-full max-w-[1320px]">
       <PageHeader
         title={isBatchPage && selectedBatch ? `Batch #${selectedBatch.id} AI CRM` : 'AI Follow-up CRM'}
         subtitle={isBatchPage && selectedBatch
@@ -264,7 +264,7 @@ export default function AIFollowupCRMDashboard() {
         right={
           <div className="flex flex-wrap items-center gap-2">
             {isBatchPage && (
-              <Link to="/admin/ai-followup-crm">
+              <Link to="/admin/ai/ai-followup-crm">
                 <SecondaryButton>
                   <Briefcase className="w-4 h-4" /> All batches
                 </SecondaryButton>
@@ -305,7 +305,7 @@ export default function AIFollowupCRMDashboard() {
       {error && <div className="mb-5"><ErrorBox msg={error} /></div>}
 
       <div className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="admin-metric-grid">
           <SummaryMetric
             icon={Phone}
             label="Lead phones"
@@ -341,7 +341,7 @@ export default function AIFollowupCRMDashboard() {
         </div>
 
         <div className="admin-card p-3">
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.1fr)] gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.15fr)] gap-3">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
@@ -392,7 +392,7 @@ export default function AIFollowupCRMDashboard() {
           />
         )}
       </div>
-    </>
+    </div>
   )
 }
 
@@ -482,7 +482,7 @@ function BatchLeadList({
         subtitle="Action-required batches rise to the top. Click a batch to open its complete dashboard."
         right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{batches.length} shown</span>}
       />
-      <div className="max-h-[calc(100vh-330px)] min-h-[420px] overflow-y-auto p-3 space-y-2">
+      <div className="grid max-h-[calc(100vh-330px)] min-h-[420px] grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-2">
         {loading && batches.length === 0 ? (
           <div className="p-4"><Spinner /></div>
         ) : batches.length === 0 ? (
@@ -666,7 +666,7 @@ function SelectedBatchLeadPanel({
           </div>
           {detailPage && (
             <Link
-              to="/admin/ai-followup-crm"
+              to="/admin/ai/ai-followup-crm"
               className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:text-emerald-300"
             >
               <Briefcase className="h-3.5 w-3.5" />
@@ -746,7 +746,7 @@ function SelectedBatchLeadPanel({
           <LeadDeskStat label="In cadence" value={counts.aiWorking} icon={Send} tone="violet" />
         </div>
 
-        <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,0.95fr)_minmax(300px,0.65fr)] gap-3">
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,0.95fr)_minmax(300px,0.65fr)] gap-3">
           <BatchActionBox batch={batch} counts={counts} insight={activeInsight} />
           <BatchRunSnapshot batch={batch} counts={counts} latest={latest} />
         </div>
@@ -754,7 +754,7 @@ function SelectedBatchLeadPanel({
         <BatchLeadLanes counts={counts} />
 
         {hasPriorityLeads ? (
-          <div className="grid grid-cols-1 2xl:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.15fr)] gap-3">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.15fr)] gap-3">
             <BatchPriorityQueue recipients={allRankedPhones} insight={activeInsight} />
             <BatchChatSummaryPanel summaries={chatSummaries} insight={activeInsight} />
           </div>

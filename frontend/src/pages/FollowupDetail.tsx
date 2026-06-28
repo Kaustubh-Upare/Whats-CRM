@@ -184,7 +184,7 @@ export default function FollowupDetail() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span>{r.retailer_name || 'Unknown retailer'}</span>
                   {r.retailer_id && (
-                    <Link to={`/admin/retailers/${r.retailer_id}`} className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1">
+                    <Link to={`/admin/messages/bulk/retailers/${r.retailer_id}`} className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1">
                       Open retailer <ExternalLink className="w-3 h-3" />
                     </Link>
                   )}
@@ -258,7 +258,7 @@ export default function FollowupDetail() {
                     <Link to={`/admin/ai/followups/${batch.id}`} className="text-emerald-600 dark:text-emerald-400 hover:underline">
                       AI control #{batch.id}
                     </Link>
-                    <Link to={`/admin/batches/${batch.id}`} className="text-xs text-slate-600 dark:text-slate-300 hover:underline inline-flex items-center gap-1">
+                    <Link to={`/admin/messages/bulk/batches/${batch.id}`} className="text-xs text-slate-600 dark:text-slate-300 hover:underline inline-flex items-center gap-1">
                       Batch <ExternalLink className="w-3 h-3" />
                     </Link>
                     <span className="text-[12px] text-slate-500 dark:text-slate-400">{batch.status}</span>

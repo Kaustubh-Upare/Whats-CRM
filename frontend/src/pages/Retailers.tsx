@@ -47,7 +47,7 @@ export default function Retailers() {
                 {list.data.items.map((r) => (
                   <Link
                     key={r.id}
-                    to={`/admin/retailers/${r.id}`}
+                    to={`/admin/messages/bulk/retailers/${r.id}`}
                     className="block rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[var(--bg-elevated)] p-3 hover:border-emerald-400/50 dark:hover:border-emerald-500/40 transition-colors"
                   >
                     <div className="flex items-start gap-2">
@@ -105,7 +105,7 @@ export default function Retailers() {
                             )}
                           </Td>
                           <Td>{fmtDate(r.updated_at)}</Td>
-                          <Td><Link to={`/admin/retailers/${r.id}`} className="text-emerald-700 dark:text-emerald-300 hover:underline text-sm">Open →</Link></Td>
+                          <Td><Link to={`/admin/messages/bulk/retailers/${r.id}`} className="text-emerald-700 dark:text-emerald-300 hover:underline text-sm">Open →</Link></Td>
                         </motion.tr>
                       ))}
                     </motion.tbody>

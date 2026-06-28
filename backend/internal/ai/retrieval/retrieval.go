@@ -1,11 +1,11 @@
 // Package retrieval is the RAG (Retrieval-Augmented Generation) layer
 // for the WhatsyITC AI assistant. It owns the three moving parts:
 //
-//  1. Retrieval:    keyword search via PostgreSQL tsvector, with a
-//     cheap re-rank step.
-//  2. Embedding:    optional future vector path. The live schema does
-//     not store KB embeddings yet, so the current runtime
-//     path does not call an embedding provider.
+//  1. Retrieval:    hybrid pgvector + keyword search, with a cheap
+//     re-rank step.
+//  2. Embedding:    query embeddings are generated only when an embedder
+//     is configured. Unembedded KB rows still participate through the
+//     keyword fallback path.
 //  3. Citations:    format the retrieved chunks with source metadata
 //     so the agent loop can inject "[1] pricing-faq.md"
 //     style references into the system prompt.
@@ -85,7 +85,7 @@ func DefaultConfig() Config {
 		KeywordWeight: 0.3,
 		TopK:          5,
 		VectorTopK:    20,
-		MinVectorSim:  0.55,
+		MinVectorSim:  0.25,
 		MinFinalScore: 0.10,
 		CacheTTL:      5 * time.Minute,
 	}
@@ -140,12 +140,9 @@ func (r *Retriever) retrieve(ctx context.Context, adminID int64, agentID *int64,
 		}
 	}
 
-	// The live KB table has content_tsv but no embedding column, so use
-	// keyword-only retrieval. This keeps Bedrock-only deployments from
-	// needing an OpenAI embedding key.
-	chunks, err := r.keywordSearch(ctx, adminID, agentID, query)
+	chunks, err := r.search(ctx, adminID, agentID, query)
 	if err != nil {
-		return nil, fmt.Errorf("keyword search: %w", err)
+		return nil, err
 	}
 
 	// Re-rank (cheap heuristic — sort by final score, drop low).
@@ -158,6 +155,42 @@ func (r *Retriever) retrieve(ctx context.Context, adminID int64, agentID *int64,
 		}
 	}
 	return chunks, nil
+}
+
+func (r *Retriever) search(ctx context.Context, adminID int64, agentID *int64, query string) ([]RetrievedChunk, error) {
+	if r.embed == nil {
+		chunks, err := r.keywordSearch(ctx, adminID, agentID, query)
+		if err != nil {
+			return nil, fmt.Errorf("keyword search: %w", err)
+		}
+		return chunks, nil
+	}
+
+	queryVec, err := r.embedQuery(ctx, query)
+	if err != nil || len(queryVec) == 0 {
+		chunks, kerr := r.keywordSearch(ctx, adminID, agentID, query)
+		if kerr != nil {
+			if err != nil {
+				return nil, fmt.Errorf("embed query: %w; keyword fallback: %w", err, kerr)
+			}
+			return nil, fmt.Errorf("keyword search: %w", kerr)
+		}
+		return chunks, nil
+	}
+
+	vectorChunks, err := r.vectorSearch(ctx, adminID, agentID, query, queryVec)
+	if err != nil {
+		chunks, kerr := r.keywordSearch(ctx, adminID, agentID, query)
+		if kerr != nil {
+			return nil, fmt.Errorf("vector search: %w; keyword fallback: %w", err, kerr)
+		}
+		return chunks, nil
+	}
+	keywordChunks, err := r.keywordSearch(ctx, adminID, agentID, query)
+	if err != nil {
+		return nil, fmt.Errorf("keyword search: %w", err)
+	}
+	return r.mergeHybrid(vectorChunks, keywordChunks, query), nil
 }
 
 // embedQuery gets the embedding for a single text, with cache.
@@ -187,8 +220,6 @@ func (r *Retriever) embedQuery(ctx context.Context, query string) ([]float32, er
 // WhatsApp questions, so scanning the recent KB rows keeps the live
 // conversation path aligned with /admin/ai/agent test runs.
 func (r *Retriever) keywordSearch(ctx context.Context, adminID int64, agentID *int64, query string) ([]RetrievedChunk, error) {
-	_ = vectorToPgVector // also unused; kept for future hybrid mode
-
 	terms := tokenizeQuery(query)
 	if len(terms) == 0 {
 		return nil, nil
@@ -258,6 +289,97 @@ func (r *Retriever) keywordSearch(ctx context.Context, adminID int64, agentID *i
 		chunks = append(chunks, item.chunk)
 	}
 	return chunks, nil
+}
+
+func (r *Retriever) vectorSearch(ctx context.Context, adminID int64, agentID *int64, query string, queryVec []float32) ([]RetrievedChunk, error) {
+	terms := tokenizeQuery(query)
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, content, source_type, coalesce(source_ref, ''), coalesce(title, ''),
+		       GREATEST(0, 1 - (embedding <=> $3::vector)) AS vector_sim
+		FROM bc_ai_kb_chunks
+		WHERE admin_user_id = $1
+		  AND embedding IS NOT NULL
+		  AND (
+		    $2::bigint IS NULL
+		    OR NOT EXISTS (
+		      SELECT 1 FROM bc_ai_agent_kb_chunks scope
+		      WHERE scope.admin_user_id = $1 AND scope.agent_id = $2
+		    )
+		    OR EXISTS (
+		      SELECT 1 FROM bc_ai_agent_kb_chunks scope
+		      WHERE scope.admin_user_id = $1
+		        AND scope.agent_id = $2
+		        AND scope.kb_chunk_id = bc_ai_kb_chunks.id
+		    )
+		  )
+		ORDER BY embedding <=> $3::vector
+		LIMIT $4
+	`, adminID, nullableAgentID(agentID), vectorToPgVector(queryVec), r.config.VectorTopK)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	chunks := []RetrievedChunk{}
+	for rows.Next() {
+		var c RetrievedChunk
+		if err := rows.Scan(&c.ID, &c.Content, &c.SourceType, &c.SourceRef, &c.Title, &c.VectorSim); err != nil {
+			return nil, err
+		}
+		if c.VectorSim < r.config.MinVectorSim {
+			continue
+		}
+		c.KeywordSim = keywordScore(terms, c.Title, c.SourceRef, c.Content)
+		c.FinalScore = r.hybridScore(c.VectorSim, c.KeywordSim)
+		chunks = append(chunks, c)
+	}
+	return chunks, rows.Err()
+}
+
+func (r *Retriever) mergeHybrid(vectorChunks, keywordChunks []RetrievedChunk, query string) []RetrievedChunk {
+	terms := tokenizeQuery(query)
+	byID := map[int64]RetrievedChunk{}
+	for _, c := range vectorChunks {
+		byID[c.ID] = c
+	}
+	for _, c := range keywordChunks {
+		if existing, ok := byID[c.ID]; ok {
+			if existing.KeywordSim == 0 {
+				existing.KeywordSim = c.KeywordSim
+			}
+			existing.FinalScore = r.hybridScore(existing.VectorSim, existing.KeywordSim)
+			byID[c.ID] = existing
+			continue
+		}
+		c.VectorSim = 0
+		if c.KeywordSim == 0 {
+			c.KeywordSim = keywordScore(terms, c.Title, c.SourceRef, c.Content)
+		}
+		c.FinalScore = c.KeywordSim
+		byID[c.ID] = c
+	}
+
+	out := make([]RetrievedChunk, 0, len(byID))
+	for _, c := range byID {
+		if c.VectorSim > 0 && c.FinalScore < r.config.MinFinalScore {
+			continue
+		}
+		out = append(out, c)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].FinalScore > out[j].FinalScore
+	})
+	if len(out) > r.config.TopK {
+		out = out[:r.config.TopK]
+	}
+	return out
+}
+
+func (r *Retriever) hybridScore(vectorSim, keywordSim float64) float64 {
+	if vectorSim <= 0 {
+		return keywordSim
+	}
+	return r.config.VectorWeight*vectorSim + r.config.KeywordWeight*keywordSim
 }
 
 // rerank is a cheap pass that:

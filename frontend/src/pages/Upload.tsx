@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
@@ -19,7 +19,7 @@ import { getBatchAIFollowup, putBatchAIFollowup, batchAIKeys } from '@/lib/batch
 import {
   AIFollowupStatusBadge, AIFollowupStatusCounts, AIFollowupLastMessage,
 } from '@/components/AIFollowupParts'
-import type { BatchAIFollowup, BatchAIRecipient, BillingRecord, UploadBatch } from '@/lib/types'
+import type { BatchAIFollowup, BatchAIRecipient, BillingRecord, Template, UploadBatch } from '@/lib/types'
 
 type UploadResp = {
   batch: UploadBatch
@@ -82,6 +82,15 @@ export default function Upload() {
     },
     onError: (e: any) => toast.error(e?.response?.data?.error || 'Upload failed'),
   })
+
+  const templates = useQuery({
+    queryKey: ['templates'],
+    queryFn: async () => (await api.get('/api/templates')).data as Template[],
+  })
+  const activeTemplate = useMemo(
+    () => (templates.data || []).find((t) => t.is_active) || null,
+    [templates.data],
+  )
 
   function reset() {
     setFile(null); setResult(null); setPreviewRow(null)
@@ -244,7 +253,7 @@ export default function Upload() {
                 <AIFollowupToggle batch={result.batch} onBatchRefreshed={applyFollowupSnapshot} />
                 {result.batch.ai_followup_enabled && (
                   <Link
-                    to={`/admin/batches/${result.batch.id}/ai-followup`}
+                    to={`/admin/messages/bulk/batches/${result.batch.id}/ai-followup`}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
                                text-emerald-700 dark:text-emerald-300
                                border border-emerald-200 dark:border-emerald-400/30
@@ -256,7 +265,7 @@ export default function Upload() {
                   </Link>
                 )}
                 {result.batch.valid_rows > 0 && (
-                  <PrimaryButton onClick={() => nav(`/admin/batches/${result.batch.id}`)}>
+                  <PrimaryButton onClick={() => nav(`/admin/messages/bulk/batches/${result.batch.id}`)}>
                     {['approved', 'sending', 'sent', 'completed'].includes(result.batch.status) ? (
                       <>Open batch <ArrowRight className="w-4 h-4" /></>
                     ) : (
@@ -289,16 +298,36 @@ export default function Upload() {
                   <div className="px-5 py-4 border-b border-slate-100 dark:border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Sparkles className="w-4 h-4 text-emerald-500" />
-                      <div className="font-semibold text-sm text-slate-900 dark:text-white">Recipient preview</div>
+                      <div>
+                        <div className="font-semibold text-sm text-slate-900 dark:text-white">Recipient preview</div>
+                        <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          {activeTemplate
+                            ? `${activeTemplate.name} / ${activeTemplate.language_code}`
+                            : templates.isLoading
+                              ? 'Loading templates...'
+                              : 'No active template selected'}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      What the retailer will see
-                    </div>
+                    {activeTemplate ? (
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        What the retailer will see
+                      </div>
+                    ) : (
+                      <Link
+                        to="/admin/templates"
+                        className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200"
+                      >
+                        Templates <ExternalLink className="h-3 w-3" />
+                      </Link>
+                    )}
                   </div>
                   <div className="p-6 flex justify-center bg-gradient-to-b from-slate-50 to-slate-100/40 dark:from-slate-900/30 dark:to-slate-800/30">
                     <PhonePreview
                       batchId={result.batch.id}
                       initialRow={previewRow}
+                      templateName={activeTemplate?.name || ''}
+                      language={activeTemplate?.language_code || ''}
                       onRowChange={setPreviewRow}
                     />
                   </div>
@@ -582,7 +611,7 @@ function AIFollowupToggle({ batch, onBatchRefreshed }: { batch: UploadBatch; onB
       {saving && <Spinner />}
       {!batchApproved && (
         <Link
-          to={`/admin/batches/${batch.id}`}
+          to={`/admin/messages/bulk/batches/${batch.id}`}
           className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
           title="Approve the batch first — opens the batch detail page"
         >

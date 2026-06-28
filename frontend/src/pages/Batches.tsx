@@ -20,7 +20,7 @@ export default function Batches() {
         title="Upload batches"
         subtitle={`${q.data?.total ?? 0} total`}
         right={
-          <Link to="/admin/upload">
+          <Link to="/admin/messages/bulk/upload">
             <PrimaryButton>New upload</PrimaryButton>
           </Link>
         }
@@ -42,7 +42,7 @@ export default function Batches() {
                 {q.data.items.map((b) => (
                   <Link
                     key={b.id}
-                    to={`/admin/batches/${b.id}`}
+                    to={`/admin/messages/bulk/batches/${b.id}`}
                     className="block rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[var(--bg-elevated)] p-3 hover:border-emerald-400/50 dark:hover:border-emerald-500/40 transition-colors"
                   >
                     <div className="flex items-start gap-2">
@@ -117,7 +117,7 @@ export default function Batches() {
                         <Td>{fmtDate(b.created_at)}</Td>
                         <Td>{b.approved_at ? fmtDate(b.approved_at) : '—'}</Td>
                         <Td>
-                          <Link to={`/admin/batches/${b.id}`} className="text-emerald-700 dark:text-emerald-300 hover:underline text-sm">
+                          <Link to={`/admin/messages/bulk/batches/${b.id}`} className="text-emerald-700 dark:text-emerald-300 hover:underline text-sm">
                             Open →
                           </Link>
                         </Td>

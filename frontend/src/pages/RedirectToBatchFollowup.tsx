@@ -18,5 +18,9 @@ export default function RedirectToBatchFollowup() {
   if (!id) {
     return <Navigate to="/admin/ai/followups" replace />
   }
-  return <Navigate to={`/admin${parent}`} replace />
+  // The redirect above assumes the original path was already under
+  // /admin/ai/* (it is, per the legacy routes we retired). If a caller
+  // somehow hits us without that prefix, normalise it before redirecting.
+  const normalised = parent.startsWith('/ai/') ? `/admin${parent}` : `/admin/ai/followups/${id}`
+  return <Navigate to={normalised} replace />
 }

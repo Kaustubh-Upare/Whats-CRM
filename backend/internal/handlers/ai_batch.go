@@ -1908,7 +1908,10 @@ func (s *Server) PutBatchAIAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "batch not found")
 		return
 	}
-	// If assigning (not clearing), verify the agent belongs to this admin.
+	// If assigning (not clearing), verify the agent belongs to this admin and
+	// wake it up. A batch that explicitly picks an agent should not get stuck
+	// behind that agent's disabled flag; the batch Disable AI control is the
+	// operator's stop switch for this workflow.
 	if req.AgentID != nil {
 		if _, err := s.Store.GetAIAgent(r.Context(), uid, *req.AgentID); err != nil {
 			if errors.Is(err, store.ErrAgentNotFound) {
@@ -1917,6 +1920,26 @@ func (s *Server) PutBatchAIAgent(w http.ResponseWriter, r *http.Request) {
 			}
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if err := s.Store.EnsureAIAgentEnabled(r.Context(), uid, *req.AgentID); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		defaultAgent, err := s.Store.GetDefaultAIAgentConfig(r.Context(), uid)
+		if err != nil {
+			if errors.Is(err, store.ErrNoDefaultAgent) {
+				writeErr(w, http.StatusBadRequest, "no default agent configured")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !defaultAgent.Enabled {
+			if err := s.Store.EnsureAIAgentEnabled(r.Context(), uid, defaultAgent.ID); err != nil {
+				writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 	}
 	if err := s.Store.SetBatchAIAgent(r.Context(), uid, batchID, req.AgentID); err != nil {

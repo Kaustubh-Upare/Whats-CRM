@@ -151,6 +151,10 @@ func (o *Orchestrator) GenerateFollowUp(
 		"Scheduled AI follow-up. If the phone looks hot, confused, risky, or needs a human check, set requires_review=true. If this is just normal cadence, set requires_review=false.",
 	)
 	msgs := historyToMessages(trimmed)
+	msgs = append(msgs, llm.Message{
+		Role:    llm.RoleUser,
+		Content: buildFollowUpUserInstruction(lastTopic, mode),
+	})
 
 	// Force the cheap tier. We bypass Router.Decide entirely because
 	// the routing logic is designed for the interactive path — for
@@ -319,6 +323,22 @@ func int64PtrFromNull(v sql.NullInt64) *int64 {
 	return &n
 }
 
+func buildFollowUpUserInstruction(lastTopic, mode string) string {
+	var b strings.Builder
+	if mode == "agentic" {
+		b.WriteString("Review the recent chat and decide whether to send the next WhatsApp follow-up now. ")
+		b.WriteString("If a follow-up would be spammy or inappropriate, return only <NO_FOLLOWUP>. ")
+		b.WriteString("Otherwise return only the single message text.")
+	} else {
+		b.WriteString("Write the single best next WhatsApp follow-up message now. Return only the message text.")
+	}
+	if topic := strings.TrimSpace(lastTopic); topic != "" {
+		b.WriteString("\nLast known topic: ")
+		b.WriteString(topic)
+	}
+	return b.String()
+}
+
 // buildFollowUpPrompt is the dedicated prompt builder for follow-up
 // mode. Kept separate from BuildSystemPrompt so the live-chat path
 // stays clean.
@@ -326,7 +346,7 @@ func int64PtrFromNull(v sql.NullInt64) *int64 {
 // The rules block is opinionated:
 //   - one short message (1-3 sentences)
 //   - end with a question that prompts a reply
-//   - no markdown / lists / emoji (unless tone=urgent)
+//   - light human WhatsApp style
 //   - don't invent prices or commitments
 //
 // This is what makes the AI-generated follow-ups feel like a real
@@ -377,12 +397,10 @@ func buildFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone, mode string)
 	b.WriteString("- Reference the last topic naturally. Do not repeat it verbatim.\n")
 	b.WriteString("- Plain text only. No markdown, no bullet lists, no links.\n")
 	b.WriteString("- 1-3 sentences. End with a question that prompts a reply.\n")
+	b.WriteString("- Sound like a real person checking in, not a campaign or bot.\n")
+	b.WriteString("- Use at most one friendly emoji if it fits the tone. Skip emoji for complaints, payment issues, or sensitive conversations.\n")
+	b.WriteString("- Never ask for the customer's phone number; WhatsApp already gives us the number.\n")
 	b.WriteString("- Do not invent prices, features, or commitments. If you don't know, say you'll check and get back.\n")
-	if strings.EqualFold(strings.TrimSpace(tone), "urgent") {
-		b.WriteString("- Tone is URGENT: ok to use one short emoji at the end if it fits.\n")
-	} else {
-		b.WriteString("- No emoji unless tone is explicitly urgent.\n")
-	}
 
 	return b.String()
 }
@@ -437,7 +455,10 @@ func buildAgenticFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone string
 	b.WriteString("OTHERWISE, write ONE short message (1-3 sentences) that:\n")
 	b.WriteString("- references the last topic naturally (don't repeat it verbatim)\n")
 	b.WriteString("- ends with a question that prompts a reply\n")
-	b.WriteString("- is plain text (no markdown, no bullet lists, no links, no emoji unless tone=urgent)\n")
+	b.WriteString("- is plain text (no markdown, no bullet lists, no links)\n")
+	b.WriteString("- sounds like a real person checking in, not a campaign or bot\n")
+	b.WriteString("- uses at most one friendly emoji if it fits, and no emoji for complaints/payment/sensitive topics\n")
+	b.WriteString("- never asks for the customer's phone number because WhatsApp already gives it to us\n")
 	b.WriteString("- does NOT invent prices, features, or commitments\n")
 	b.WriteString("- feels like a real person, not a marketing blast\n\n")
 

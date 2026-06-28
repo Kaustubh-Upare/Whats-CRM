@@ -32,24 +32,26 @@ type Registry struct {
 // the caller can construct one without depending on the config package
 // (useful in tests).
 type RegistryConfig struct {
-	AWSRegion            string
-	AWSAccessKey         string
-	AWSSecretKey         string
-	BedrockBearerToken   string
-	BedrockOpenAIAPIKey  string
-	BedrockOpenAIBaseURL string
-	BedrockModel         string
-	OpenAIAPIKey         string
-	OpenAIBaseURL        string
-	OpenAIModel          string
-	EmbedModel           string
-	EmbedDim             int
-	DeepgramAPIKey       string
-	DeepgramModel        string
-	BedrockDeepSeek      string
-	BedrockClaudeSonnet  string
-	BedrockClaudeHaiku   string
-	BedrockProfile       string
+	AWSRegion             string
+	AWSAccessKey          string
+	AWSSecretKey          string
+	BedrockBearerToken    string
+	BedrockOpenAIAPIKey   string
+	BedrockOpenAIBaseURL  string
+	BedrockModel          string
+	OpenAIAPIKey          string
+	OpenAIBaseURL         string
+	OpenAIModel           string
+	EmbedModel            string
+	EmbedDim              int
+	OpenAIChatEnabled     bool
+	OpenAIFallbackEnabled bool
+	DeepgramAPIKey        string
+	DeepgramModel         string
+	BedrockDeepSeek       string
+	BedrockClaudeSonnet   string
+	BedrockClaudeHaiku    string
+	BedrockProfile        string
 }
 
 // NewRegistry builds the full LLM stack. It NEVER log.Fatals — the
@@ -95,9 +97,11 @@ func NewRegistry(ctx context.Context, cfg RegistryConfig) (*Registry, error) {
 	var openaiP *OpenAIProvider
 	if cfg.OpenAIAPIKey != "" {
 		op, err := NewOpenAIProvider(OpenAIConfig{
-			APIKey:       cfg.OpenAIAPIKey,
-			DefaultModel: defaultStr(cfg.OpenAIModel, "gpt-4.1"),
-			BaseURL:      cfg.OpenAIBaseURL,
+			APIKey:          cfg.OpenAIAPIKey,
+			DefaultModel:    defaultStr(cfg.OpenAIModel, "gpt-4.1"),
+			BaseURL:         cfg.OpenAIBaseURL,
+			EmbedModel:      defaultStr(cfg.EmbedModel, "text-embedding-3-small"),
+			EmbedDimensions: cfg.EmbedDim,
 		})
 		if err == nil {
 			openaiP = op
@@ -123,13 +127,16 @@ func NewRegistry(ctx context.Context, cfg RegistryConfig) (*Registry, error) {
 	// fallback (caller can extend later).
 	switch {
 	case bedrock != nil && openaiP != nil:
-		fallbacks := []FallbackTarget{
-			{Provider: openaiP, Model: defaultStr(cfg.OpenAIModel, "gpt-4.1")},
+		var fallbacks []FallbackTarget
+		if cfg.OpenAIFallbackEnabled {
+			fallbacks = []FallbackTarget{
+				{Provider: openaiP, Model: defaultStr(cfg.OpenAIModel, "gpt-4.1")},
+			}
 		}
 		r.primary = NewFailover(bedrock, fallbacks)
 	case bedrock != nil:
 		r.primary = NewFailover(bedrock, nil)
-	case openaiP != nil:
+	case openaiP != nil && cfg.OpenAIChatEnabled:
 		r.primary = NewFailover(openaiP, nil)
 	default:
 		// No LLM configured. Return a registry with nil primary;
@@ -169,6 +176,15 @@ func (r *Registry) HasEmbeddings() bool {
 		}
 	}
 	return false
+}
+
+func (r *Registry) EmbeddingModel() string {
+	if op, ok := r.providers["openai"]; ok {
+		if named, ok := op.(interface{ EmbeddingModel() string }); ok {
+			return named.EmbeddingModel()
+		}
+	}
+	return defaultStr(r.cfg.EmbedModel, "text-embedding-3-small")
 }
 
 // HasTranscriber returns true when a Deepgram key is configured.

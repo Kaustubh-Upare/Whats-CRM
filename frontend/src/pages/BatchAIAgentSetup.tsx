@@ -190,7 +190,7 @@ export default function BatchAIAgentSetup() {
                 <InfoRow label="Status" value={batch?.status || 'Unknown'} />
                 <InfoRow label="Rows" value={`${batch?.valid_rows ?? 0} valid from ${batch?.total_rows ?? 0}`} />
                 <InfoRow label="Uploaded" value={batch?.created_at ? fmtRelative(batch.created_at) : 'Unknown'} />
-                <Link to={`/admin/batches/${batchID}`} className="inline-flex items-center gap-1 text-emerald-700 hover:underline dark:text-emerald-300">
+                <Link to={`/admin/messages/bulk/batches/${batchID}`} className="inline-flex items-center gap-1 text-emerald-700 hover:underline dark:text-emerald-300">
                   Open batch <ExternalLink className="w-3 h-3" />
                 </Link>
               </div>

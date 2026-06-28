@@ -1,70 +1,118 @@
-import { NavLink, Link, useLocation, useOutlet } from 'react-router-dom'
+import { NavLink, Link, useLocation, useNavigate, useOutlet } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AlertTriangle, MoreVertical, ChevronUp } from 'lucide-react'
-import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Component, useEffect, useMemo, useRef, useState, type ComponentType, type ErrorInfo, type ReactNode } from 'react'
 import { api, setToken } from '@/lib/api'
 import {
   LayoutDashboard, UploadCloud, Layers, Users, MessageSquare, MessagesSquare,
   FileText, BarChart3, Settings, LogOut, Activity, ShieldCheck, KeyRound, Bot,
-  BellRing, UserCheck,
+  BellRing, UserCheck, Sparkles, Send,
 } from 'lucide-react'
 import ThemeToggle from '@/components/ThemeToggle'
 import { useAuth } from '@/lib/useAuth'
 import { useMediaQuery } from '@/lib/useMediaQuery'
+import {
+  useWorkspace, WORKSPACE_ORDER, WORKSPACES,
+  workspaceFromPath, type WorkspaceId,
+} from '@/lib/workspace'
 
-const nav = [
-  { to: '/admin',              label: 'Dashboard',   icon: LayoutDashboard, title: 'Dashboard' },
-  { to: '/admin/upload',       label: 'Upload',      icon: UploadCloud,     title: 'Upload' },
-  { to: '/admin/batches',      label: 'Batches',     icon: Layers,          title: 'Batches' },
-  { to: '/admin/retailers',    label: 'Retailers',   icon: Users,           title: 'Retailers' },
-  { to: '/admin/messages',     label: 'Messages',    icon: MessageSquare,   title: 'Messages' },
-  { to: '/admin/chats',        label: 'Chats',       icon: MessagesSquare,  title: 'Chats' },
-  { to: '/admin/webhook-logs', label: 'Webhook log', icon: Activity,        title: 'Webhook log' },
-  { to: '/admin/audit-log',    label: 'Audit log',   icon: ShieldCheck,     title: 'Audit log' },
-  { to: '/admin/templates',    label: 'Templates',   icon: FileText,        title: 'Templates' },
-  { to: '/admin/reports',      label: 'Reports',     icon: BarChart3,       title: 'Reports' },
-  { to: '/admin/credentials',  label: 'Credentials', icon: KeyRound,        title: 'Credentials' },
-  { to: '/admin/ai',           label: 'AI Assistant',icon: Bot,             title: 'AI Assistant' },
-  { to: '/admin/ai/followups', label: 'AI Follow-ups',icon: BellRing,       title: 'AI Follow-ups' },
-  { to: '/admin/ai/human-review', label: 'Human Review', icon: UserCheck,   title: 'Human Review' },
-  { to: '/admin/ai-followup-crm', label: 'AI CRM',    icon: BarChart3,       title: 'AI CRM' },
-  { to: '/admin/settings',     label: 'Settings',    icon: Settings,        title: 'Settings' },
+// ---------------------------------------------------------------------------
+// Navigation — split into two workspaces. The sidebar renders only the
+// items belonging to the active workspace. The route paths here MUST
+// match the <Route> declarations in App.tsx.
+// ---------------------------------------------------------------------------
+
+type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; title?: string }
+
+/** Bulk Messages workspace — everything about uploading billing files,
+ *  approving batches, sending WhatsApp messages, and the audit trail. */
+const navBulk: NavItem[] = [
+  { to: '/admin/messages/bulk',           label: 'Dashboard',   icon: LayoutDashboard, title: 'Dashboard' },
+  { to: '/admin/messages/bulk/upload',    label: 'Upload',      icon: UploadCloud,     title: 'Upload' },
+  { to: '/admin/messages/bulk/batches',   label: 'Batches',     icon: Layers,          title: 'Batches' },
+  { to: '/admin/messages/bulk/retailers', label: 'Retailers',   icon: Users,           title: 'Retailers' },
+  { to: '/admin/messages/bulk/messages',  label: 'Messages',    icon: MessageSquare,   title: 'Messages' },
+  { to: '/admin/messages/bulk/chats',     label: 'Chats',       icon: MessagesSquare,  title: 'Chats' },
+  { to: '/admin/messages/bulk/templates', label: 'Templates',   icon: FileText,        title: 'Templates' },
 ]
+
+/** AI Workflows workspace — agent config, knowledge base, follow-ups,
+ *  human review queue, and the AI CRM surfaces. */
+const navAI: NavItem[] = [
+  { to: '/admin/ai',                label: 'Dashboard',  icon: LayoutDashboard, title: 'AI Dashboard' },
+  { to: '/admin/ai/agent',          label: 'Agent',      icon: Bot,             title: 'AI Agent' },
+  { to: '/admin/ai/knowledge',      label: 'Knowledge',  icon: FileText,        title: 'Knowledge' },
+  { to: '/admin/ai/conversations',  label: 'Conversations', icon: MessagesSquare, title: 'Conversations' },
+  { to: '/admin/ai/followups',      label: 'Follow-ups', icon: BellRing,        title: 'AI Follow-ups' },
+  { to: '/admin/ai/human-review',   label: 'Human Review', icon: UserCheck,     title: 'Human Review' },
+  { to: '/admin/ai/ai-followup-crm', label: 'AI CRM',    icon: BarChart3,       title: 'AI CRM' },
+  { to: '/admin/ai/crm/leads',      label: 'CRM Leads',  icon: Users,           title: 'CRM Leads' },
+]
+
+const NAV_BY_WORKSPACE: Record<WorkspaceId, NavItem[]> = {
+  bulk: navBulk,
+  ai: navAI,
+}
 
 // Routes that ONLY appear in the mobile overflow menu (not in the icon rail
 // at all). The rail gets crowded on tiny phones, so we put the rarely-used
-// destinations behind a "more" menu in the top bar.
-const overflowRoutes = [
-  { to: '/admin/settings',     label: 'Settings',     icon: Settings },
-  { to: '/admin/audit-log',    label: 'Audit log',    icon: ShieldCheck },
-  { to: '/admin/webhook-logs', label: 'Webhook log',  icon: Activity },
-  { to: '/admin/credentials',  label: 'Credentials',  icon: KeyRound },
-  { to: '/admin/reports',      label: 'Reports',      icon: BarChart3 },
+// destinations behind a "more" menu in the top bar. Settings is now global
+// (top-right) and no longer lives here.
+const overflowRoutesBulk: NavItem[] = [
+  { to: '/admin/messages/bulk/audit-log',    label: 'Audit log',    icon: ShieldCheck },
+  { to: '/admin/messages/bulk/webhook-logs', label: 'Webhook log',  icon: Activity },
+  { to: '/admin/messages/bulk/credentials',  label: 'Credentials',  icon: KeyRound },
+  { to: '/admin/messages/bulk/reports',      label: 'Reports',      icon: BarChart3 },
 ]
+const overflowRoutesAI: NavItem[] = [
+  { to: '/admin/ai/crm/pipelines', label: 'CRM Pipelines', icon: Layers },
+  { to: '/admin/ai/crm/sequences', label: 'CRM Sequences', icon: Send },
+]
+const OVERFLOW_BY_WORKSPACE: Record<WorkspaceId, NavItem[]> = {
+  bulk: overflowRoutesBulk,
+  ai: overflowRoutesAI,
+}
 
 /** Map the current pathname to a human-readable title for the mobile top bar. */
-function pageTitle(pathname: string): string {
+function pageTitle(pathname: string, nav: NavItem[]): string {
   // Find the longest matching nav entry — supports nested routes like
-  // /admin/batches/:id falling back to /admin/batches' title.
-  let best: { to: string; title: string } | null = null
+  // /admin/batches/:id falling back to /admin/batches' title. The title
+  // is optional (overflow items don't carry one), so fall back to the
+  // nav item's label and finally to a generic "Admin".
+  let best: { to: string; label: string; title?: string } | null = null
   for (const n of nav) {
     if (pathname === n.to || pathname.startsWith(n.to + '/')) {
       if (!best || n.to.length > best.to.length) best = n
     }
   }
-  if (best) return best.title
+  if (best) return best.title || best.label
   if (pathname.startsWith('/admin')) return 'Admin'
   return ''
 }
 
 export default function Layout() {
   const location = useLocation()
+  const navigate = useNavigate()
   const outlet = useOutlet()
   const { user: me } = useAuth()
+  const { active, setActive, current: activeWorkspace } = useWorkspace()
 
   // ≥1024 px = full sidebar; otherwise icon rail (72 px) + (below 640 px) top bar.
   const isWide = useMediaQuery('(min-width: 1024px)', true)
   const isTiny = useMediaQuery('(max-width: 639px)', false)
+
+  // Keep the workspace context in sync with the URL. This makes deep links
+  // work — if someone emails a teammate /admin/ai/followups, opening it
+  // lands them on the AI workspace automatically. The reverse is also
+  // true: navigating within a workspace doesn't bump you back to the
+  // default after a refresh.
+  useEffect(() => {
+    const fromPath = workspaceFromPath(location.pathname)
+    if (fromPath !== active) setActive(fromPath)
+    // Intentionally only depend on pathname — re-running on `active`
+    // would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
 
   // User popover (icon-rail mode only — full mode shows it inline).
   const [userOpen, setUserOpen] = useState(false)
@@ -84,18 +132,15 @@ export default function Layout() {
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef<HTMLDivElement | null>(null)
   const [humanReviewCount, setHumanReviewCount] = useState(0)
-  useEffect(() => {
-    if (!moreOpen) return
-    const onDoc = (e: MouseEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
-        setMoreOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [moreOpen])
 
+  // Only poll the human-review endpoint while the AI workspace is active
+  // (that's the only place the badge renders). Saves one round-trip /
+  // 30s for users who spend most of their time on Bulk Messages.
   useEffect(() => {
+    if (active !== 'ai') {
+      setHumanReviewCount(0)
+      return
+    }
     let alive = true
     const load = () => {
       api.get('/api/ai/human-review', { params: { status: 'open', limit: 1, refresh: false } })
@@ -112,14 +157,38 @@ export default function Layout() {
       alive = false
       window.clearInterval(t)
     }
-  }, [])
+  }, [active])
+
+  // Overflow outside-click handler — kept outside the AI-only block so it
+  // works on the Bulk workspace too.
+  useEffect(() => {
+    if (!moreOpen) return
+    const onDoc = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
+        setMoreOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [moreOpen])
 
   function logout() {
     setToken(null)
     api.post('/auth/logout').finally(() => { window.location.href = '/login' })
   }
 
-  const title = pageTitle(location.pathname)
+  /** Switching workspaces: jump to that workspace's dashboard. We pick
+   *  the dashboard rather than the previous page so the user lands on
+   *  a sensible default after toggling. */
+  function switchWorkspace(id: WorkspaceId) {
+    if (id === active) return
+    setActive(id)
+    navigate(WORKSPACES[id].basePath)
+  }
+
+  const nav = useMemo(() => NAV_BY_WORKSPACE[active], [active])
+  const overflowRoutes = useMemo(() => OVERFLOW_BY_WORKSPACE[active], [active])
+  const title = pageTitle(location.pathname, nav)
 
   return (
     <div className="min-h-screen flex bg-slate-50 dark:bg-[#020617] transition-colors relative">
@@ -170,8 +239,79 @@ export default function Layout() {
             )}
           </Link>
           {isWide && (
-            <div className="ml-auto"><ThemeToggle /></div>
+            <div className="ml-auto flex items-center gap-1">
+              {/* Global Settings — accessible from any workspace, doesn't
+                  belong to either nav list. */}
+              <NavLink
+                to="/admin/settings"
+                title="Settings"
+                aria-label="Settings"
+                className={({ isActive }) =>
+                  `w-8 h-8 inline-flex items-center justify-center rounded-md text-slate-600 dark:text-slate-300 transition-colors ${
+                    isActive
+                      ? 'bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white'
+                      : 'hover:bg-slate-100 dark:hover:bg-white/5'
+                  }`
+                }
+              >
+                <Settings className="w-4 h-4" />
+              </NavLink>
+              <ThemeToggle />
+            </div>
           )}
+        </div>
+
+        {/* Workspace switcher — segmented control under the brand header.
+            Visible in both wide and rail modes (label collapses when narrow). */}
+        <div className="px-2 lg:px-3 pt-3 pb-1">
+          <div
+            role="tablist"
+            aria-label="Workspace"
+            className={`relative grid grid-cols-2 gap-0 p-1 rounded-lg
+                        bg-slate-100/80 dark:bg-white/5
+                        border border-slate-200/70 dark:border-white/10`}
+          >
+            {WORKSPACE_ORDER.map((id) => {
+              const ws = WORKSPACES[id]
+              const isActive = id === active
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => switchWorkspace(id)}
+                  className={`relative isolate inline-flex items-center justify-center gap-1.5
+                              h-8 rounded-md text-xs font-medium transition-colors
+                              ${isWide ? 'px-2' : 'px-1'}
+                              ${isActive
+                                ? 'text-slate-900 dark:text-white'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                  title={ws.description}
+                >
+                  {/* Sliding active pill — one element PER button, swapped
+                      with layoutId so Framer Motion animates between them
+                      instead of us hand-rolling a translateX (which broke
+                      because translateX(100%) was relative to the pill's
+                      own width, not the container). */}
+                  {isActive && (
+                    <motion.span
+                      aria-hidden
+                      layoutId="workspace-pill"
+                      className="absolute inset-0 rounded-md
+                                 bg-white dark:bg-[#0a1124]
+                                 shadow-[0_1px_2px_rgba(15,23,42,0.08),0_4px_12px_-4px_rgba(15,23,42,0.12)]
+                                 dark:shadow-[0_1px_2px_rgba(0,0,0,0.4),0_4px_12px_-4px_rgba(0,0,0,0.5)]
+                                 -z-10"
+                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  {id === 'bulk' ? <Send className="w-3.5 h-3.5" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {isWide && <span className="truncate">{ws.shortLabel}</span>}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         {/* Nav */}
@@ -180,10 +320,10 @@ export default function Layout() {
             <NavLink
               key={n.to}
               to={n.to}
-              // `end` only true on the index route — otherwise every /admin/*
-              // page would keep showing "Dashboard" as active because
-              // prefix matching kicks in for non-end NavLinks.
-              end={n.to === '/admin' || n.to === '/admin/ai'}
+              // `end` true on each workspace's index route — otherwise the
+              // matching prefix would keep the workspace's Dashboard
+              // highlighted on every nested page.
+              end={n.to === '/admin/messages/bulk' || n.to === '/admin/ai'}
               title={!isWide ? n.label : undefined}
               aria-label={n.label}
               className={({ isActive }) =>
@@ -306,6 +446,34 @@ export default function Layout() {
             <div className="font-semibold text-sm text-slate-900 dark:text-white truncate flex-1">
               {title || 'Admin'}
             </div>
+            {/* Workspace pill (mobile) — tap to flip. Same data as the
+                sidebar switcher, kept small so it fits the top bar. */}
+            <button
+              type="button"
+              onClick={() => switchWorkspace(active === 'ai' ? 'bulk' : 'ai')}
+              aria-label={`Switch to ${active === 'ai' ? 'Bulk Messages' : 'AI Workflows'} workspace`}
+              className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium
+                         bg-slate-100 dark:bg-white/10
+                         text-slate-700 dark:text-slate-200
+                         hover:bg-slate-200 dark:hover:bg-white/20 transition-colors"
+            >
+              {active === 'ai' ? <Sparkles className="w-3 h-3" /> : <Send className="w-3 h-3" />}
+              <span>{activeWorkspace.shortLabel}</span>
+            </button>
+            {/* Global Settings — accessible from any workspace. */}
+            <NavLink
+              to="/admin/settings"
+              aria-label="Settings"
+              className={({ isActive }) =>
+                `w-7 h-7 inline-flex items-center justify-center rounded-md transition-colors ${
+                  isActive
+                    ? 'bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white'
+                    : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5'
+                }`
+              }
+            >
+              <Settings className="w-4 h-4" />
+            </NavLink>
             <ThemeToggle />
             <div ref={moreRef} className="relative">
               <button
@@ -376,7 +544,7 @@ export default function Layout() {
             </Link>
           </motion.div>
         )}
-        <div className="p-4 sm:p-6 lg:p-8 max-w-[1500px]">
+        <div className="w-full max-w-[1500px] mx-auto p-4 sm:p-6 lg:p-8">
           {/* AnimatePresence gives every route a soft crossfade on change. */}
           <AnimatePresence initial={false} mode="popLayout">
             <motion.div

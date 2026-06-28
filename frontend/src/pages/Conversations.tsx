@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   MessagesSquare, Search, Send, ChevronLeft, ChevronRight, Hand, Bot,
@@ -30,22 +30,17 @@ import type { AIConversation, AIConversationMessage } from '@/lib/types'
  * No SSE in Phase 2 — polling is sufficient for an internal admin tool.
  */
 export default function Conversations() {
+  const [searchParams] = useSearchParams()
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [phoneFilter, setPhoneFilter] = useState('')
   const [selectedID, setSelectedID] = useState<number | null>(null)
+  const phoneParam = searchParams.get('phone') || ''
 
   const list = useQuery({
     queryKey: aiKeys.conversations({ status: statusFilter === 'all' ? undefined : statusFilter }),
     queryFn: () => listConversations({ status: statusFilter === 'all' ? undefined : statusFilter, limit: 100 }),
     refetchInterval: 5000,
   })
-
-  // Auto-select first conversation when the list loads.
-  useEffect(() => {
-    if (!selectedID && list.data && list.data.items.length > 0) {
-      setSelectedID(list.data.items[0].id)
-    }
-  }, [selectedID, list.data])
 
   const items = list.data?.items || []
   const filtered = useMemo(() => {
@@ -54,8 +49,25 @@ export default function Conversations() {
     return items.filter((c) => c.phone.toLowerCase().includes(q))
   }, [items, phoneFilter])
 
+  useEffect(() => {
+    if (phoneParam.trim()) setPhoneFilter(phoneParam.trim())
+  }, [phoneParam])
+
+  // Auto-select the first visible conversation, and recover if the selected
+  // conversation is no longer in the list after a refresh/key migration.
+  useEffect(() => {
+    if (!items.length) {
+      if (selectedID) setSelectedID(null)
+      return
+    }
+    const visible = filtered.length ? filtered : items
+    if (!selectedID || !visible.some((c) => c.id === selectedID)) {
+      setSelectedID(visible[0].id)
+    }
+  }, [filtered, items, selectedID])
+
   return (
-    <>
+    <div className="mx-auto w-full max-w-[1320px]">
       <PageHeader
         title="Conversations"
         subtitle="Live inbox of WhatsApp threads the AI is handling. Polls every 5s."
@@ -75,10 +87,19 @@ export default function Conversations() {
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
+      <div className="admin-conversation-split lg:gap-4">
         {/* Left: list */}
-        <Card className="!p-0 overflow-hidden">
+        <Card className="!p-0 overflow-hidden sm:sticky sm:top-6" hover={false}>
           <div className="p-3 border-b border-slate-200 dark:border-white/10 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900 dark:text-white">Users</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {filtered.length} shown from {items.length}
+                </div>
+              </div>
+              {list.isFetching && <RefreshCw className="h-4 w-4 animate-spin text-slate-400" />}
+            </div>
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -113,7 +134,7 @@ export default function Conversations() {
             </div>
           </div>
 
-          <div className="max-h-[calc(100vh-280px)] overflow-y-auto">
+          <div className="max-h-[calc(100vh-300px)] min-h-[420px] overflow-y-auto">
             {list.isLoading ? <Spinner /> :
              list.isError ? <ErrorBox msg={(list.error as any)?.message || 'Failed to load'} /> :
              filtered.length === 0 ? (
@@ -131,7 +152,7 @@ export default function Conversations() {
         </Card>
 
         {/* Right: thread */}
-        <div>
+        <div className="min-w-0">
           {selectedID ? (
             <ConversationDetail id={selectedID} />
           ) : (
@@ -144,7 +165,7 @@ export default function Conversations() {
           )}
         </div>
       </div>
-    </>
+    </div>
   )
 }
 
@@ -233,7 +254,7 @@ function ConversationDetail({ id }: { id: number }) {
   const isHandedOff = conv.data?.status === 'handed_off'
 
   return (
-    <Card className="!p-0 overflow-hidden flex flex-col" hover={false}>
+    <Card className="!p-0 overflow-hidden flex flex-col min-h-[620px]" hover={false}>
       <CardHeader
         title={
           <span className="inline-flex items-center gap-2">
@@ -267,7 +288,7 @@ function ConversationDetail({ id }: { id: number }) {
       />
 
       {/* Thread */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50/40 dark:bg-white/[0.02] min-h-[300px] max-h-[55vh]">
+      <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50/40 dark:bg-white/[0.02] min-h-[360px] max-h-[calc(100vh-360px)]">
         {messages.isLoading ? <Spinner /> :
          messages.isError ? <ErrorBox msg={(messages.error as any)?.message || 'Failed'} /> :
          (messages.data || []).length === 0 ? <Empty>No messages yet.</Empty> :

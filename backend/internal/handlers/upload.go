@@ -234,7 +234,7 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 	audit.Log(ctx, s.Store.DB, audit.Entry{
 		ActorID: &uid, ActorEmail: &email,
 		Action: "batch.uploaded", EntityType: strPtr("batch"), EntityID: &id,
-		Metadata: map[string]any{"total": total, "valid": valid, "invalid": invalid, "duplicates": duplicates, "optouts": optouts, "file": header.Filename},
+		Metadata:  map[string]any{"total": total, "valid": valid, "invalid": invalid, "duplicates": duplicates, "optouts": optouts, "file": header.Filename},
 		IPAddress: &ip, UserAgent: &ua,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -281,7 +281,7 @@ func (s *Server) ApproveBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	tpl, err := s.Store.GetActiveTemplate(r.Context(), uid, tname, lang)
 	if tpl == nil {
-		writeErr(w, http.StatusBadRequest, "template not active: "+tname+"/"+lang+" — add it under /templates first")
+		writeErr(w, http.StatusBadRequest, templateNotActiveMessage(tname, lang))
 		return
 	}
 	email := middleware.Email(r)
@@ -320,7 +320,7 @@ func (s *Server) ApproveBatch(w http.ResponseWriter, r *http.Request) {
 	audit.Log(r.Context(), s.Store.DB, audit.Entry{
 		ActorID: &uid, ActorEmail: &email,
 		Action: "batch.approved_and_queued", EntityType: strPtr("batch"), EntityID: &id,
-		Metadata: map[string]any{"queued": queued, "template": tpl.Name, "lang": tpl.LanguageCode},
+		Metadata:  map[string]any{"queued": queued, "template": tpl.Name, "lang": tpl.LanguageCode},
 		IPAddress: &ip, UserAgent: &ua,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "queued": queued})
@@ -334,9 +334,10 @@ func (s *Server) ApproveBatch(w http.ResponseWriter, r *http.Request) {
 // "approve now, send later" flow.
 //
 // Status transitions:
-//   validated → approved   (success)
-//   approved / sending / sent / completed → 409 Conflict
-//   missing / not owned → 404
+//
+//	validated → approved   (success)
+//	approved / sending / sent / completed → 409 Conflict
+//	missing / not owned → 404
 func (s *Server) ApproveBatchOnly(w http.ResponseWriter, r *http.Request) {
 	uid := middleware.UserID(r)
 	email := middleware.Email(r)
@@ -377,7 +378,7 @@ func (s *Server) ApproveBatchOnly(w http.ResponseWriter, r *http.Request) {
 	audit.Log(r.Context(), s.Store.DB, audit.Entry{
 		ActorID: &uid, ActorEmail: &email,
 		Action: "batch.approved_only", EntityType: strPtr("batch"), EntityID: &id,
-		Metadata: map[string]any{"note": "approve-only; no messages queued"},
+		Metadata:  map[string]any{"note": "approve-only; no messages queued"},
 		IPAddress: &ip, UserAgent: &ua,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "queued": 0})
@@ -389,13 +390,25 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
+func templateNotActiveMessage(name, lang string) string {
+	if name == "" || lang == "" {
+		return "No template selected. Open Templates, create or activate a WhatsApp template, then choose it before previewing or sending."
+	}
+	return fmt.Sprintf(
+		"Template %s/%s is not active for your workspace. Open Templates, activate this template, or choose another active template before previewing or sending.",
+		name,
+		lang,
+	)
+}
+
 // PreviewBatchMessage renders the exact WhatsApp message body that will be
 // delivered for one row of a batch — using the same template + param
 // substitution the worker uses, so the chat-thread preview matches what
 // the retailer sees on their phone pixel-for-pixel.
 //
 // Query params:
-//   ?template=<name>&lang=<code>&row=<row_number>
+//
+//	?template=<name>&lang=<code>&row=<row_number>
 //
 // `row` is the row_number of the billing record to render. If omitted,
 // the first valid row is used. The response also returns the recipient
@@ -428,7 +441,7 @@ func (s *Server) PreviewBatchMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	tpl, err := s.Store.GetActiveTemplate(r.Context(), uid, tname, lang)
 	if tpl == nil {
-		writeErr(w, http.StatusBadRequest, "template not active: "+tname+"/"+lang)
+		writeErr(w, http.StatusBadRequest, templateNotActiveMessage(tname, lang))
 		return
 	}
 
@@ -482,13 +495,13 @@ func (s *Server) PreviewBatchMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"body":             body,
-		"template_name":    tpl.Name,
-		"language_code":    tpl.LanguageCode,
-		"row_number":       chosen.RowNumber,
-		"retailer_name":    name,
-		"whatsapp_number":  phone,
-		"template_params":  params,
+		"body":            body,
+		"template_name":   tpl.Name,
+		"language_code":   tpl.LanguageCode,
+		"row_number":      chosen.RowNumber,
+		"retailer_name":   name,
+		"whatsapp_number": phone,
+		"template_params": params,
 	})
 }
 
@@ -561,7 +574,7 @@ func (s *Server) PatchBatch(w http.ResponseWriter, r *http.Request) {
 	audit.Log(r.Context(), s.Store.DB, audit.Entry{
 		ActorID: &uid, ActorEmail: &email,
 		Action: "batch.renamed", EntityType: strPtr("batch"), EntityID: &id,
-		Metadata: meta,
+		Metadata:  meta,
 		IPAddress: &ip, UserAgent: &ua,
 	})
 
@@ -632,7 +645,7 @@ func (s *Server) ResendBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	tpl, err := s.Store.GetActiveTemplate(r.Context(), uid, tname, lang)
 	if tpl == nil {
-		writeErr(w, http.StatusBadRequest, "template not active: "+tname+"/"+lang)
+		writeErr(w, http.StatusBadRequest, templateNotActiveMessage(tname, lang))
 		return
 	}
 
@@ -640,8 +653,8 @@ func (s *Server) ResendBatch(w http.ResponseWriter, r *http.Request) {
 	// body silently — unknown keys are ignored so the frontend can
 	// grow the API without coordination.
 	var scope struct {
-		OnlyFailed  bool       `json:"only_failed"`
-		RowNumbers  []int      `json:"row_numbers"`
+		OnlyFailed bool  `json:"only_failed"`
+		RowNumbers []int `json:"row_numbers"`
 	}
 	// Body is optional and tiny; MaxBytesReader cap matches PatchBatch.
 	if r.ContentLength > 0 {
@@ -745,12 +758,12 @@ func (s *Server) ResendBatch(w http.ResponseWriter, r *http.Request) {
 		ActorID: &uid, ActorEmail: &email,
 		Action: "batch.resent", EntityType: strPtr("batch"), EntityID: &id,
 		Metadata: map[string]any{
-			"queued":       queued,
-			"skipped":      skipped,
-			"template":     tpl.Name,
-			"lang":         tpl.LanguageCode,
-			"only_failed":  scope.OnlyFailed,
-			"row_numbers":  scope.RowNumbers,
+			"queued":      queued,
+			"skipped":     skipped,
+			"template":    tpl.Name,
+			"lang":        tpl.LanguageCode,
+			"only_failed": scope.OnlyFailed,
+			"row_numbers": scope.RowNumbers,
 		},
 		IPAddress: &ip, UserAgent: &ua,
 	})

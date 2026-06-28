@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	openai "github.com/openai/openai-go/v3"
@@ -15,9 +16,11 @@ import (
 
 // OpenAIConfig is the configuration for the OpenAI provider.
 type OpenAIConfig struct {
-	APIKey       string
-	DefaultModel string
-	BaseURL      string
+	APIKey          string
+	DefaultModel    string
+	BaseURL         string
+	EmbedModel      string
+	EmbedDimensions int
 }
 
 // OpenAIProvider implements Provider against the OpenAI Responses API.
@@ -27,20 +30,56 @@ type OpenAIProvider struct {
 	cfg    OpenAIConfig
 }
 
+const defaultOpenAIBaseURL = "https://api.openai.com/v1"
+
 // NewOpenAIProvider builds the OpenAI client.
 func NewOpenAIProvider(cfg OpenAIConfig) (*OpenAIProvider, error) {
+	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	if cfg.APIKey == "" {
 		return nil, errors.New("openai: API key is required")
 	}
+	cfg.DefaultModel = strings.TrimSpace(cfg.DefaultModel)
 	if cfg.DefaultModel == "" {
 		cfg.DefaultModel = "gpt-4.1"
 	}
-	opts := []option.RequestOption{option.WithAPIKey(cfg.APIKey)}
-	if cfg.BaseURL != "" {
-		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
+	cfg.EmbedModel = strings.TrimSpace(cfg.EmbedModel)
+	if cfg.EmbedModel == "" {
+		cfg.EmbedModel = "text-embedding-3-small"
+	}
+	if cfg.EmbedDimensions == 0 {
+		cfg.EmbedDimensions = 1536
+	}
+	baseURL, err := normalizeOpenAIBaseURL(cfg.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	cfg.BaseURL = baseURL
+
+	opts := []option.RequestOption{
+		option.WithAPIKey(cfg.APIKey),
+		// Set this explicitly so an empty OPENAI_BASE_URL in .env cannot
+		// make the SDK fall back to a hostless path such as "/embeddings".
+		option.WithBaseURL(cfg.BaseURL),
 	}
 	c := openai.NewClient(opts...)
 	return &OpenAIProvider{client: c, cfg: cfg}, nil
+}
+
+func normalizeOpenAIBaseURL(raw string) (string, error) {
+	s := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if s == "" {
+		return defaultOpenAIBaseURL, nil
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("openai: invalid base URL %q", raw)
+	}
+	switch u.Scheme {
+	case "http", "https":
+		return s, nil
+	default:
+		return "", fmt.Errorf("openai: invalid base URL scheme %q", u.Scheme)
+	}
 }
 
 func (p *OpenAIProvider) Name() string { return "openai" }
@@ -69,10 +108,13 @@ func (p *OpenAIProvider) Embed(ctx context.Context, texts []string) ([][]float32
 		return nil, nil
 	}
 	params := openai.EmbeddingNewParams{
-		Model: openai.EmbeddingModelTextEmbedding3Small,
+		Model: openai.EmbeddingModel(p.embeddingModel()),
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: append([]string{}, texts...),
 		},
+	}
+	if p.cfg.EmbedDimensions > 0 && strings.HasPrefix(p.embeddingModel(), "text-embedding-3") {
+		params.Dimensions = openai.Int(int64(p.cfg.EmbedDimensions))
 	}
 	resp, err := p.client.Embeddings.New(ctx, params)
 	if err != nil {
@@ -87,6 +129,17 @@ func (p *OpenAIProvider) Embed(ctx context.Context, texts []string) ([][]float32
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+func (p *OpenAIProvider) EmbeddingModel() string {
+	return p.embeddingModel()
+}
+
+func (p *OpenAIProvider) embeddingModel() string {
+	if strings.TrimSpace(p.cfg.EmbedModel) == "" {
+		return "text-embedding-3-small"
+	}
+	return strings.TrimSpace(p.cfg.EmbedModel)
 }
 
 // Chat is the non-streaming convenience method.

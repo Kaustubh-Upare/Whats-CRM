@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WhatsyITC AI Sales Agent Setup Guide</title>
+  <style>
+    @page { size: A4; margin: 13mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #eef2f7;
+      color: #0f172a;
+      line-height: 1.44;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 16mm;
+      background: #fff;
+      position: relative;
+      overflow: hidden;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+    .cover {
+      color: #f8fafc;
+      background:
+        radial-gradient(circle at 85% 9%, rgba(16,185,129,0.27), transparent 30%),
+        radial-gradient(circle at 16% 86%, rgba(37,99,235,0.24), transparent 34%),
+        linear-gradient(135deg, #06111f, #111827 58%, #07111f);
+    }
+    .cover-grid-bg {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: .22;
+      background:
+        linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(180deg, black 0%, transparent 54%);
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border: 1px solid rgba(148,163,184,.36);
+      border-radius: 14px;
+      background: rgba(15,23,42,.54);
+      font-weight: 850;
+      font-size: 13px;
+      letter-spacing: .02em;
+    }
+    .logo {
+      width: 30px;
+      height: 30px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      color: white;
+      font-weight: 900;
+      background: linear-gradient(135deg, #10b981, #2563eb);
+    }
+    h1 {
+      margin: 56px 0 14px;
+      font-size: 50px;
+      line-height: .98;
+      letter-spacing: -.045em;
+      max-width: 730px;
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      line-height: 1.08;
+      letter-spacing: -.03em;
+    }
+    h3 {
+      margin: 0 0 7px;
+      font-size: 15px;
+      letter-spacing: -.012em;
+    }
+    p {
+      margin: 0 0 11px;
+      color: #475569;
+      font-size: 12.6px;
+    }
+    .lead {
+      color: #cbd5e1;
+      font-size: 17px;
+      max-width: 700px;
+    }
+    .eyebrow {
+      color: #059669;
+      text-transform: uppercase;
+      font-size: 10.5px;
+      letter-spacing: .14em;
+      font-weight: 900;
+      margin-bottom: 8px;
+    }
+    .cover .eyebrow { color: #6ee7b7; }
+    .cover-panel {
+      margin-top: 34px;
+      border-radius: 24px;
+      border: 1px solid rgba(148,163,184,.26);
+      background: rgba(15,23,42,.64);
+      padding: 18px;
+      box-shadow: 0 28px 74px rgba(0,0,0,.28);
+    }
+    .hero-map {
+      display: grid;
+      grid-template-columns: 1.12fr .88fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+    .mock {
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: #0b1220;
+      overflow: hidden;
+      min-height: 250px;
+    }
+    .mock-top {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 12px;
+      background: #111827;
+      color: #94a3b8;
+      font-size: 10px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 99px; background: #64748b; }
+    .mock-body { padding: 14px; display: grid; gap: 10px; }
+    .mock-card {
+      border: 1px solid rgba(148,163,184,.2);
+      border-radius: 15px;
+      padding: 12px;
+      background: rgba(255,255,255,.045);
+    }
+    .mock-card strong { display: block; color: #fff; font-size: 13px; }
+    .mock-card span { display: block; color: #94a3b8; font-size: 10.5px; margin-top: 4px; }
+    .cover-list { display: grid; gap: 9px; }
+    .cover-item {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 16px;
+      padding: 13px;
+      background: rgba(255,255,255,.055);
+    }
+    .cover-item strong { display: block; color: #fff; font-size: 13px; }
+    .cover-item span { display: block; color: #94a3b8; font-size: 11px; margin-top: 4px; }
+    .section-head {
+      display: grid;
+      grid-template-columns: 1fr .9fr;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 16px;
+    }
+    .section-head p { margin-bottom: 0; }
+    .two-col { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+    .three-col { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+    .four-col { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 9px; }
+    .card {
+      border: 1px solid #e2e8f0;
+      border-radius: 17px;
+      padding: 14px;
+      background: #fff;
+      box-shadow: 0 10px 26px rgba(15,23,42,.045);
+    }
+    .green { background: linear-gradient(180deg, #ecfdf5, #fff); }
+    .blue { background: linear-gradient(180deg, #eff6ff, #fff); }
+    .amber { background: linear-gradient(180deg, #fffbeb, #fff); }
+    .rose { background: linear-gradient(180deg, #fff1f2, #fff); }
+    .slate { background: linear-gradient(180deg, #f8fafc, #fff); }
+    .kpi small {
+      display: block;
+      color: #64748b;
+      text-transform: uppercase;
+      font-size: 9.6px;
+      letter-spacing: .08em;
+      font-weight: 900;
+    }
+    .kpi strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 21px;
+      letter-spacing: -.03em;
+      color: #0f172a;
+    }
+    ul.clean { margin: 8px 0 0; padding: 0; list-style: none; }
+    ul.clean li {
+      position: relative;
+      padding-left: 16px;
+      margin: 6px 0;
+      color: #475569;
+      font-size: 11.7px;
+    }
+    ul.clean li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 6px;
+      width: 6px;
+      height: 6px;
+      border-radius: 99px;
+      background: #10b981;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 7px;
+      margin-top: 10px;
+    }
+    .step {
+      border: 1px solid #e2e8f0;
+      border-radius: 15px;
+      padding: 11px;
+      background: #f8fafc;
+      min-height: 112px;
+    }
+    .num {
+      width: 25px;
+      height: 25px;
+      display: grid;
+      place-items: center;
+      border-radius: 99px;
+      background: #0f172a;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 900;
+      margin-bottom: 9px;
+    }
+    .step strong { display: block; font-size: 12.2px; }
+    .step span { display: block; color: #64748b; font-size: 10px; margin-top: 4px; }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+    .chip {
+      display: inline-flex;
+      border-radius: 99px;
+      border: 1px solid #dbeafe;
+      background: #eff6ff;
+      color: #1d4ed8;
+      padding: 4px 8px;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .chip.green { border-color: #bbf7d0; background: #ecfdf5; color: #047857; }
+    .chip.amber { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+    .chip.rose { border-color: #fecdd3; background: #fff1f2; color: #be123c; }
+    .matrix {
+      display: grid;
+      grid-template-columns: .8fr 1.18fr 1.08fr;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+    .matrix div {
+      padding: 10px;
+      border-right: 1px solid #e2e8f0;
+      border-bottom: 1px solid #e2e8f0;
+      color: #475569;
+      font-size: 11.2px;
+    }
+    .matrix div:nth-child(3n) { border-right: 0; }
+    .matrix div:nth-last-child(-n+3) { border-bottom: 0; }
+    .matrix .head {
+      background: #f8fafc;
+      color: #0f172a;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      font-size: 10.2px;
+      font-weight: 900;
+    }
+    .screen {
+      border: 1px solid #cbd5e1;
+      border-radius: 20px;
+      overflow: hidden;
+      background: #0b1220;
+      margin-top: 12px;
+      box-shadow: 0 22px 56px rgba(15,23,42,.14);
+    }
+    .screen-top {
+      height: 32px;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      padding: 0 12px;
+      background: #111827;
+      color: #94a3b8;
+      font-size: 10px;
+    }
+    .screen-body { display: grid; grid-template-columns: 185px 1fr; min-height: 242px; }
+    .side { padding: 12px; border-right: 1px solid rgba(148,163,184,.18); }
+    .main { padding: 12px; background: #0f172a; }
+    .row {
+      border-radius: 12px;
+      border: 1px solid rgba(45,212,191,.22);
+      background: rgba(20,184,166,.14);
+      padding: 9px;
+      margin-bottom: 7px;
+      color: #e2e8f0;
+    }
+    .row strong { display: block; font-size: 11px; }
+    .row span { display: block; color: #94a3b8; font-size: 9.8px; margin-top: 3px; }
+    .bubble {
+      width: fit-content;
+      max-width: 78%;
+      border-radius: 15px;
+      border: 1px solid rgba(96,165,250,.24);
+      background: rgba(37,99,235,.2);
+      padding: 9px 11px;
+      color: #dbeafe;
+      font-size: 10.8px;
+      margin: 8px 0;
+    }
+    .bubble.in {
+      margin-left: auto;
+      background: rgba(16,185,129,.18);
+      border-color: rgba(52,211,153,.24);
+      color: #d1fae5;
+    }
+    .note {
+      border-left: 4px solid #10b981;
+      border-radius: 0 14px 14px 0;
+      background: #f8fafc;
+      padding: 10px 12px;
+      color: #334155;
+      font-size: 12.3px;
+      margin-top: 12px;
+    }
+    .warning {
+      border-left: 4px solid #f59e0b;
+      background: #fffbeb;
+      color: #78350f;
+    }
+    .footer {
+      position: absolute;
+      left: 16mm;
+      right: 16mm;
+      bottom: 8mm;
+      display: flex;
+      justify-content: space-between;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 7px;
+      color: #94a3b8;
+      font-size: 9.8px;
+    }
+    .cover .footer { border-color: rgba(148,163,184,.22); color: #94a3b8; }
+    @media print {
+      body { background: #fff; }
+      .page { margin: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <section class="page cover">
+    <div class="cover-grid-bg"></div>
+    <div class="brand"><span class="logo">W</span> WhatsyITC</div>
+    <div class="eyebrow" style="margin-top:44px;">User setup guide</div>
+    <h1>AI Sales Agent setup, knowledge, follow-ups, and human review.</h1>
+    <p class="lead">
+      A practical guide for users who want to configure the AI sales agent,
+      connect WhatsApp credentials, add business knowledge, enable batch follow-ups,
+      and understand how the full AI sales flow works.
+    </p>
+    <div class="cover-panel">
+      <div class="hero-map">
+        <div class="mock">
+          <div class="mock-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>AI Sales Agent workspace</span></div>
+          <div class="mock-body">
+            <div class="mock-card"><strong>1. Connect WhatsApp</strong><span>Credentials allow the system to receive and send messages.</span></div>
+            <div class="mock-card"><strong>2. Train with knowledge</strong><span>Products, pricing, policies, FAQs, and objection handling.</span></div>
+            <div class="mock-card"><strong>3. Enable follow-ups</strong><span>Choose batch, agent, timeline, and review urgent leads.</span></div>
+          </div>
+        </div>
+        <div class="cover-list">
+          <div class="cover-item"><strong>Agent setup</strong><span>Name, tone, model, prompt, and default behavior.</span></div>
+          <div class="cover-item"><strong>Knowledge base</strong><span>Facts the AI uses before replying.</span></div>
+          <div class="cover-item"><strong>Human review</strong><span>Important numbers and suggested actions.</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Setup and operations</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Quick overview</div>
+        <h2>What the AI sales agent does.</h2>
+      </div>
+      <p>The agent is designed to help sales teams follow up on WhatsApp without losing context, missing buyer replies, or manually writing every routine answer.</p>
+    </div>
+    <div class="four-col">
+      <div class="card kpi green"><small>Connect</small><strong>WhatsApp</strong><p>Send and receive using your Meta Cloud API credentials.</p></div>
+      <div class="card kpi blue"><small>Teach</small><strong>Knowledge</strong><p>Add products, pricing, FAQs, and policies.</p></div>
+      <div class="card kpi amber"><small>Automate</small><strong>Follow-ups</strong><p>Let AI continue conversations after batch sends.</p></div>
+      <div class="card kpi rose"><small>Escalate</small><strong>Review</strong><p>Human operators see urgent phone numbers first.</p></div>
+    </div>
+    <div class="flow">
+      <div class="step"><div class="num">1</div><strong>Credentials</strong><span>Add WhatsApp connection details.</span></div>
+      <div class="step"><div class="num">2</div><strong>Agent</strong><span>Create name, tone, prompt, model.</span></div>
+      <div class="step"><div class="num">3</div><strong>Knowledge</strong><span>Add business facts.</span></div>
+      <div class="step"><div class="num">4</div><strong>Test</strong><span>Ask real buyer questions.</span></div>
+      <div class="step"><div class="num">5</div><strong>Follow-up</strong><span>Enable AI for a batch.</span></div>
+      <div class="step"><div class="num">6</div><strong>Review</strong><span>Handle urgent leads.</span></div>
+    </div>
+    <div class="note">Simple rule: set up credentials first, test the agent second, then enable AI follow-ups on a real batch.</div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 2</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Step 1</div>
+        <h2>Set up WhatsApp credentials.</h2>
+      </div>
+      <p>Credentials connect the system to Meta WhatsApp Cloud API. Without this, the app may show conversations but cannot reliably send or receive real WhatsApp messages.</p>
+    </div>
+    <div class="two-col">
+      <div class="card green">
+        <h3>What the user needs</h3>
+        <ul class="clean">
+          <li>Meta WhatsApp phone number ID.</li>
+          <li>WhatsApp access token.</li>
+          <li>Webhook verify token.</li>
+          <li>Correct API version.</li>
+          <li>Webhook URL configured in Meta.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>What this enables</h3>
+        <ul class="clean">
+          <li>Send approved WhatsApp template messages.</li>
+          <li>Receive incoming buyer replies.</li>
+          <li>Track statuses like sent, delivered, read, failed.</li>
+          <li>Attach inbound messages to the correct admin and phone.</li>
+          <li>Let AI respond after receiving messages.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="screen">
+      <div class="screen-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>Credentials screen</span></div>
+      <div class="screen-body">
+        <div class="side">
+          <div class="row"><strong>Phone number ID</strong><span>Meta sender identity</span></div>
+          <div class="row"><strong>Access token</strong><span>Used for sending</span></div>
+          <div class="row"><strong>Verify token</strong><span>Used for webhook check</span></div>
+        </div>
+        <div class="main">
+          <div class="bubble">Status: verified</div>
+          <div class="bubble">Webhook: receiving messages</div>
+          <div class="bubble in">Buyer reply received and saved</div>
+        </div>
+      </div>
+    </div>
+    <div class="note warning">If sending fails with authentication errors, check the active credentials in Settings first. Old or removed tokens should not be used.</div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 3</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Step 2</div>
+        <h2>Create and configure the AI sales agent.</h2>
+      </div>
+      <p>The agent is the personality and decision layer. It tells the AI how to speak, what role it has, and how it should behave in WhatsApp conversations.</p>
+    </div>
+    <div class="three-col">
+      <div class="card green">
+        <h3>Agent identity</h3>
+        <ul class="clean">
+          <li>Name shown internally.</li>
+          <li>Friendly sales tone.</li>
+          <li>Short WhatsApp style replies.</li>
+          <li>Human touch, not robotic language.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>Model settings</h3>
+        <ul class="clean">
+          <li>Primary chat model.</li>
+          <li>Fallback behavior if configured.</li>
+          <li>Embedding model for knowledge search.</li>
+          <li>Environment-controlled provider keys.</li>
+        </ul>
+      </div>
+      <div class="card amber">
+        <h3>System prompt</h3>
+        <ul class="clean">
+          <li>Explain business role.</li>
+          <li>Use known phone number; do not ask again.</li>
+          <li>Answer using knowledge.</li>
+          <li>Ask for human help when unsure.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card rose" style="margin-top:13px;">
+      <h3>Good prompt behavior</h3>
+      <p>The agent should sound like a helpful sales person on WhatsApp: concise, warm, context-aware, and never over-explaining. It can use a light emoji when natural, but the message should still feel professional.</p>
+      <div class="chip-row">
+        <span class="chip green">Short</span>
+        <span class="chip">Human</span>
+        <span class="chip amber">Context-aware</span>
+        <span class="chip rose">Escalates when unsure</span>
+      </div>
+    </div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 4</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Step 3</div>
+        <h2>Add knowledge the agent can use.</h2>
+      </div>
+      <p>Knowledge is where the user teaches the AI about products, prices, policies, delivery, FAQs, and common sales answers.</p>
+    </div>
+    <div class="flow">
+      <div class="step"><div class="num">1</div><strong>Paste text</strong><span>Add product or business info.</span></div>
+      <div class="step"><div class="num">2</div><strong>Generate</strong><span>Create clean knowledge chunks.</span></div>
+      <div class="step"><div class="num">3</div><strong>Review</strong><span>Check titles and content.</span></div>
+      <div class="step"><div class="num">4</div><strong>Embed</strong><span>Semantic search vectors are created.</span></div>
+      <div class="step"><div class="num">5</div><strong>Retrieve</strong><span>AI finds relevant facts.</span></div>
+      <div class="step"><div class="num">6</div><strong>Reply</strong><span>Buyer gets grounded answer.</span></div>
+    </div>
+    <div class="two-col" style="margin-top:13px;">
+      <div class="card green">
+        <h3>Best knowledge to add</h3>
+        <ul class="clean">
+          <li>Product categories and catalog details.</li>
+          <li>Pricing, discounts, and minimum order rules.</li>
+          <li>Delivery areas and timelines.</li>
+          <li>Return, refund, or complaint policies.</li>
+          <li>Common objections and approved answers.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>How to write good knowledge</h3>
+        <ul class="clean">
+          <li>Use clear headings.</li>
+          <li>Keep one topic per section.</li>
+          <li>Use direct facts, not vague marketing.</li>
+          <li>Update old prices immediately.</li>
+          <li>Test with real customer questions.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note">For long documents, the system should split text into chunks and use embeddings so the AI retrieves only the most relevant facts. This keeps answers faster, cheaper, and more accurate.</div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 5</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Step 4</div>
+        <h2>Test before enabling live follow-ups.</h2>
+      </div>
+      <p>The playground is where users check whether the agent understands the business before it speaks to real buyers.</p>
+    </div>
+    <div class="screen">
+      <div class="screen-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>Agent test playground</span></div>
+      <div class="screen-body">
+        <div class="side">
+          <div class="row"><strong>Curious buyer</strong><span>Product question</span></div>
+          <div class="row"><strong>Price-sensitive</strong><span>Pricing objection</span></div>
+          <div class="row"><strong>Human needed</strong><span>Escalation test</span></div>
+        </div>
+        <div class="main">
+          <div class="bubble in">Hi, what kinds of sweets do you have?</div>
+          <div class="bubble">We have gulab jamun, rasgulla, kaju katli, ladoo, and more. What quantity are you looking for?</div>
+          <div class="bubble in">What is the price?</div>
+          <div class="bubble">Pricing depends on quantity and delivery date. I can help you choose the best option.</div>
+        </div>
+      </div>
+    </div>
+    <div class="three-col" style="margin-top:13px;">
+      <div class="card green"><h3>Pass</h3><p>The answer uses knowledge, sounds natural, and asks a useful next question.</p></div>
+      <div class="card amber"><h3>Improve</h3><p>If facts are missing, update knowledge or adjust the system prompt.</p></div>
+      <div class="card rose"><h3>Do not enable yet</h3><p>If it gives wrong pricing, asks for known phone number, or ignores the buyer intent.</p></div>
+    </div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 6</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Step 5</div>
+        <h2>Enable AI follow-ups for a batch.</h2>
+      </div>
+      <p>AI follow-ups are batch-specific. This keeps ownership clear when the same phone appears in different uploads.</p>
+    </div>
+    <div class="two-col">
+      <div class="card green">
+        <h3>Before enabling AI</h3>
+        <ul class="clean">
+          <li>Batch has valid WhatsApp numbers.</li>
+          <li>Initial template send is complete or planned.</li>
+          <li>Agent has been tested.</li>
+          <li>Knowledge is available.</li>
+          <li>Duplicate phone warnings are reviewed.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>Enable dialog choices</h3>
+        <ul class="clean">
+          <li>Behavior mode: default, custom, or intelligent.</li>
+          <li>Timeline: send every few days.</li>
+          <li>Maximum number of follow-up messages.</li>
+          <li>Agent selection for the batch.</li>
+          <li>Skip or override duplicate phone ownership.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card amber" style="margin-top:13px;">
+      <h3>What happens after enabling</h3>
+      <p>The system tracks recipients in that batch, links each phone to the selected agent, watches inbound replies, and generates follow-up messages based on cadence, chat history, knowledge, and the batch objective.</p>
+      <div class="chip-row">
+        <span class="chip green">Batch-owned</span>
+        <span class="chip">Agent assigned</span>
+        <span class="chip amber">Cadence active</span>
+        <span class="chip rose">Human review ready</span>
+      </div>
+    </div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 7</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Step 6</div>
+        <h2>Manage follow-up control room.</h2>
+      </div>
+      <p>The follow-up page is for managing one batch. It should answer: who is tracked, which agent is active, what is the next message, and what needs attention.</p>
+    </div>
+    <div class="screen">
+      <div class="screen-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>Batch AI follow-up page</span></div>
+      <div class="screen-body">
+        <div class="side">
+          <div class="row"><strong>Recipients</strong><span>Tracked phone list</span></div>
+          <div class="row"><strong>Selected phone</strong><span>Test Retailer</span></div>
+          <div class="row"><strong>Timeline</strong><span>Open in dialog</span></div>
+        </div>
+        <div class="main">
+          <div class="bubble">Agent: Kaustubh, AI enabled</div>
+          <div class="bubble">Next message: editable before sending</div>
+          <div class="bubble in">Buyer replied: Can we meet next week?</div>
+          <div class="bubble">Suggested action: confirm day and time.</div>
+        </div>
+      </div>
+    </div>
+    <div class="three-col" style="margin-top:13px;">
+      <div class="card green"><h3>Edit next message</h3><p>User can see exactly what will be sent and adjust it before sending.</p></div>
+      <div class="card blue"><h3>Generate next message</h3><p>User can provide a prompt; AI uses recent history and knowledge to draft a better follow-up.</p></div>
+      <div class="card rose"><h3>Send next</h3><p>Use a confirmation dialog so the operator intentionally sends the next WhatsApp message.</p></div>
+    </div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 8</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Conversations</div>
+        <h2>Understand what the buyer and agent said.</h2>
+      </div>
+      <p>Users should be able to open a phone thread and see both sides of the conversation: buyer messages, AI messages, human messages, templates, and errors.</p>
+    </div>
+    <div class="two-col">
+      <div class="card green">
+        <h3>Chats</h3>
+        <p>The raw WhatsApp conversation view. Use this to inspect the full phone timeline regardless of whether AI is active.</p>
+        <ul class="clean">
+          <li>Buyer inbound messages.</li>
+          <li>Outbound templates.</li>
+          <li>Manual replies.</li>
+          <li>Status and failures.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>AI Conversations</h3>
+        <p>The AI-managed conversation inbox. Use this to monitor threads the agent is handling or has handled.</p>
+        <ul class="clean">
+          <li>AI replies.</li>
+          <li>User replies.</li>
+          <li>Handoff status.</li>
+          <li>Take over and hand back controls.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note">Both views should show the same phone history. The difference is purpose: Chats are general message history; AI Conversations are for managing the AI-assisted thread.</div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 9</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Human review</div>
+        <h2>Handle important numbers first.</h2>
+      </div>
+      <p>Human Review is the priority queue. It tells the user which phone numbers need attention, why they matter, and what action to take.</p>
+    </div>
+    <div class="two-col">
+      <div class="card rose">
+        <h3>Why a number appears</h3>
+        <ul class="clean">
+          <li>Buyer asked for a human.</li>
+          <li>Message failed to send.</li>
+          <li>Buyer asked a price or buying question.</li>
+          <li>Buyer showed meeting intent.</li>
+          <li>AI confidence is low.</li>
+          <li>Complaint or negative sentiment appears.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>What the user should do</h3>
+        <ul class="clean">
+          <li>Read reason and last message.</li>
+          <li>Use AI help for summary or draft reply.</li>
+          <li>Open conversation if context is needed.</li>
+          <li>Send a human response if required.</li>
+          <li>Resolve or snooze once handled.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="screen">
+      <div class="screen-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>Human review queue</span></div>
+      <div class="screen-body">
+        <div class="side">
+          <div class="row"><strong>Test Retailer</strong><span>critical - human needed</span></div>
+          <div class="row"><strong>Buyer 204</strong><span>high - price question</span></div>
+        </div>
+        <div class="main">
+          <div class="bubble in">Can we discuss next week?</div>
+          <div class="bubble">AI help: summarize, draft reply, suggest next step.</div>
+          <div class="bubble">Suggested action: confirm preferred day and move to meeting.</div>
+        </div>
+      </div>
+    </div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 10</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">AI CRM</div>
+        <h2>Use batch dashboards for management.</h2>
+      </div>
+      <p>AI CRM gives a manager-friendly summary of what is happening across AI-enabled batches and which leads need action.</p>
+    </div>
+    <div class="four-col">
+      <div class="card kpi green"><small>Phones</small><strong>Tracked</strong><p>Valid numbers currently managed by AI.</p></div>
+      <div class="card kpi rose"><small>Action</small><strong>Required</strong><p>Urgent numbers, failed sends, handoff.</p></div>
+      <div class="card kpi blue"><small>Replies</small><strong>Buyer</strong><p>How many customers have responded.</p></div>
+      <div class="card kpi amber"><small>Cadence</small><strong>Next</strong><p>Who needs next follow-up or first touch.</p></div>
+    </div>
+    <div class="two-col" style="margin-top:13px;">
+      <div class="card">
+        <h3>Batch summary</h3>
+        <p>Shows status of each batch: AI on/off, important phone numbers, reply activity, and priority.</p>
+      </div>
+      <div class="card">
+        <h3>AI summaries</h3>
+        <p>Uses recent messages to summarize intent, objections, buyer readiness, and recommended next action.</p>
+      </div>
+    </div>
+    <div class="note">Use AI CRM when asking: “Which batch needs attention today?” Use Human Review when asking: “Which phone should I handle now?”</div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 11</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Full flow</div>
+        <h2>What happens when a buyer sends a message.</h2>
+      </div>
+      <p>This is the most important flow for users to understand. It explains why the AI replies, why it may skip, and where the conversation appears.</p>
+    </div>
+    <div class="flow">
+      <div class="step"><div class="num">1</div><strong>Webhook</strong><span>WhatsApp sends inbound event.</span></div>
+      <div class="step"><div class="num">2</div><strong>Save</strong><span>Message is stored in conversation.</span></div>
+      <div class="step"><div class="num">3</div><strong>Resolve</strong><span>Find admin, batch, agent, phone.</span></div>
+      <div class="step"><div class="num">4</div><strong>Think</strong><span>Read history and retrieve knowledge.</span></div>
+      <div class="step"><div class="num">5</div><strong>Act</strong><span>Reply, handoff, or review.</span></div>
+      <div class="step"><div class="num">6</div><strong>Display</strong><span>Update chats, AI inbox, CRM, review.</span></div>
+    </div>
+    <div class="matrix">
+      <div class="head">Condition</div><div class="head">What happens</div><div class="head">Where user sees it</div>
+      <div>AI enabled and agent active</div><div>AI reads context and sends a reply.</div><div>AI Conversations, Chats, batch timeline.</div>
+      <div>Human handoff active</div><div>AI pauses; operator can manually reply.</div><div>AI Conversations and Human Review.</div>
+      <div>Low confidence or urgent signal</div><div>Conversation is surfaced for human review.</div><div>Human Review and AI CRM.</div>
+      <div>Send fails</div><div>Error is saved and visible.</div><div>Chats, Human Review, batch dashboard.</div>
+      <div>No valid batch ownership</div><div>System may save the message but skip AI reply.</div><div>Chats and logs; user should check follow-up setup.</div>
+    </div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 12</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Daily workflow</div>
+        <h2>How users should operate the system.</h2>
+      </div>
+      <p>The best user experience is simple: check urgent work first, then monitor batch health, then improve the agent.</p>
+    </div>
+    <div class="three-col">
+      <div class="card green">
+        <h3>Daily operator</h3>
+        <ul class="clean">
+          <li>Open Human Review.</li>
+          <li>Handle critical and high numbers.</li>
+          <li>Use AI help to draft replies.</li>
+          <li>Open Chats for full context.</li>
+          <li>Resolve after action.</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <h3>Daily manager</h3>
+        <ul class="clean">
+          <li>Open AI CRM.</li>
+          <li>Check action required by batch.</li>
+          <li>Review buyer replies and cadence.</li>
+          <li>Open batch detail if needed.</li>
+          <li>Adjust plan or agent.</li>
+        </ul>
+      </div>
+      <div class="card amber">
+        <h3>Weekly admin</h3>
+        <ul class="clean">
+          <li>Check WhatsApp credentials.</li>
+          <li>Review failed sends.</li>
+          <li>Improve knowledge base.</li>
+          <li>Test agent with new questions.</li>
+          <li>Clean duplicate batch ownership.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card rose" style="margin-top:13px;">
+      <h3>Quick troubleshooting order</h3>
+      <p>If AI does not reply: check credentials, webhook admin mapping, batch AI enabled, duplicate phone ownership, agent enabled, handoff state, LLM provider error, and send error.</p>
+    </div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 13</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Best practices</div>
+        <h2>How to get reliable AI sales replies.</h2>
+      </div>
+      <p>The system works best when setup is clean and users treat the AI as a sales assistant with clear information, not as a magic box.</p>
+    </div>
+    <div class="two-col">
+      <div class="card green">
+        <h3>Do this</h3>
+        <ul class="clean">
+          <li>Use clear product and pricing knowledge.</li>
+          <li>Keep replies short and WhatsApp-friendly.</li>
+          <li>Test agent before enabling live follow-ups.</li>
+          <li>Use confirmation dialogs for manual sends.</li>
+          <li>Review Human Review every day.</li>
+        </ul>
+      </div>
+      <div class="card rose">
+        <h3>Avoid this</h3>
+        <ul class="clean">
+          <li>Do not enable AI on messy duplicate batches blindly.</li>
+          <li>Do not leave old credentials active.</li>
+          <li>Do not use vague knowledge for pricing answers.</li>
+          <li>Do not ignore failed sends.</li>
+          <li>Do not let stale handoff block active batch AI.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card blue" style="margin-top:13px;">
+      <h3>Recommended first rollout</h3>
+      <p>Start with one small batch, one configured agent, one clean knowledge set, and two verified WhatsApp test numbers. Send a template, reply from the phone, confirm AI response, then check Chats, AI Conversations, Human Review, and AI CRM.</p>
+    </div>
+    <div class="footer"><span>WhatsyITC AI Sales Agent Guide</span><span>Page 14</span></div>
+  </section>
+</body>
+</html>

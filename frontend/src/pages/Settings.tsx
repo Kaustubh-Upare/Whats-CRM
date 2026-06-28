@@ -82,7 +82,7 @@ export default function Settings() {
                   {opted.map((r) => (
                     <li key={r.id} className="px-2 py-2 text-sm flex items-center gap-3">
                       <PillPop className="pill-red">opted out</PillPop>
-                      <Link to={`/admin/retailers/${r.id}`} className="font-medium hover:underline text-slate-900 dark:text-white">{r.retailer_name}</Link>
+                      <Link to={`/admin/messages/bulk/retailers/${r.id}`} className="font-medium hover:underline text-slate-900 dark:text-white">{r.retailer_name}</Link>
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{r.whatsapp_number}</span>
                       <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">{fmtRelative(r.opted_out_at)}</span>
                     </li>

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,7 +36,7 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
+	loadEnvOverrides()
 	cfg := config.Load()
 
 	logger := newLogger(cfg)
@@ -87,7 +88,7 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		if creds == nil {
+		if creds == nil || creds.RemovedAt != nil || strings.TrimSpace(creds.PhoneNumberID) == "" || strings.TrimSpace(accessToken) == "" {
 			return nil, worker.ErrNoCredentials
 		}
 		apiVersion := creds.APIVersion
@@ -132,30 +133,28 @@ func main() {
 	// registry to exist (and degrade to disabled) so the webhook
 	// wiring + opt-out handler can ship.
 	bedrockConfigured := bedrockEnvConfigured()
-	openAIAPIKey := envOr("OPENAI_API_KEY", "")
-	if bedrockConfigured && !envBool("OPENAI_FALLBACK_ENABLED", false) {
-		openAIAPIKey = ""
-	}
-
+	openAIFallbackEnabled := envBool("OPENAI_FALLBACK_ENABLED", false)
 	llmReg, llmErr := llm.NewRegistry(ctx, llm.RegistryConfig{
-		AWSRegion:            envOr("AWS_REGION", ""),
-		AWSAccessKey:         envOr("AWS_ACCESS_KEY_ID", ""),
-		AWSSecretKey:         envOr("AWS_SECRET_ACCESS_KEY", ""),
-		BedrockBearerToken:   firstEnv("AWS_BEARER_TOKEN_BEDROCK", "BEDROCK_API_KEY"),
-		BedrockOpenAIAPIKey:  envOr("BEDROCK_API_KEY", ""),
-		BedrockOpenAIBaseURL: envOr("BEDROCK_BASE_URL", ""),
-		BedrockModel:         envOr("BEDROCK_MODEL", ""),
-		OpenAIAPIKey:         openAIAPIKey,
-		OpenAIBaseURL:        envOr("OPENAI_BASE_URL", ""),
-		OpenAIModel:          envOr("OPENAI_MODEL", "gpt-4.1"),
-		EmbedModel:           envOr("OPENAI_EMBED_MODEL", "text-embedding-3-small"),
-		EmbedDim:             1536,
-		DeepgramAPIKey:       envOr("DEEPGRAM_API_KEY", ""),
-		DeepgramModel:        envOr("DEEPGRAM_MODEL", "nova-2"),
-		BedrockDeepSeek:      envOr("BEDROCK_DEEPSEEK_MODEL", envOr("BEDROCK_MODEL", "deepseek.deepseek-v3-2")),
-		BedrockClaudeSonnet:  envOr("BEDROCK_CLAUDE_SONNET_MODEL", envOr("BEDROCK_MODEL", "anthropic.claude-sonnet-4-5-20250929")),
-		BedrockClaudeHaiku:   envOr("BEDROCK_CLAUDE_HAIKU_MODEL", envOr("BEDROCK_MODEL", "anthropic.claude-haiku-4-5-20251001")),
-		BedrockProfile:       envOr("BEDROCK_INFERENCE_PROFILE_ARN", ""),
+		AWSRegion:             envOr("AWS_REGION", ""),
+		AWSAccessKey:          envOr("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretKey:          envOr("AWS_SECRET_ACCESS_KEY", ""),
+		BedrockBearerToken:    firstEnv("AWS_BEARER_TOKEN_BEDROCK", "BEDROCK_API_KEY"),
+		BedrockOpenAIAPIKey:   envOr("BEDROCK_API_KEY", ""),
+		BedrockOpenAIBaseURL:  envOr("BEDROCK_BASE_URL", ""),
+		BedrockModel:          envOr("BEDROCK_MODEL", ""),
+		OpenAIAPIKey:          envOr("OPENAI_API_KEY", ""),
+		OpenAIBaseURL:         envOr("OPENAI_BASE_URL", ""),
+		OpenAIModel:           envOr("OPENAI_MODEL", "gpt-4.1"),
+		EmbedModel:            envOr("OPENAI_EMBED_MODEL", "text-embedding-3-small"),
+		EmbedDim:              envInt("OPENAI_EMBED_DIM", 1536),
+		OpenAIChatEnabled:     !bedrockConfigured || openAIFallbackEnabled,
+		OpenAIFallbackEnabled: openAIFallbackEnabled,
+		DeepgramAPIKey:        envOr("DEEPGRAM_API_KEY", ""),
+		DeepgramModel:         envOr("DEEPGRAM_MODEL", "nova-2"),
+		BedrockDeepSeek:       envOr("BEDROCK_DEEPSEEK_MODEL", envOr("BEDROCK_MODEL", "deepseek.deepseek-v3-2")),
+		BedrockClaudeSonnet:   envOr("BEDROCK_CLAUDE_SONNET_MODEL", envOr("BEDROCK_MODEL", "anthropic.claude-sonnet-4-5-20250929")),
+		BedrockClaudeHaiku:    envOr("BEDROCK_CLAUDE_HAIKU_MODEL", envOr("BEDROCK_MODEL", "anthropic.claude-haiku-4-5-20251001")),
+		BedrockProfile:        envOr("BEDROCK_INFERENCE_PROFILE_ARN", ""),
 	})
 	if llmErr != nil {
 		logger.Warn("llm registry build error (continuing without AI)", "err", llmErr)
@@ -170,8 +169,21 @@ func main() {
 
 	var retriever *retrieval.Retriever
 	if llmReg != nil && llmReg.Enabled() {
-		retriever = retrieval.NewRetriever(st.DB, nil, retrieval.NewMemoryCache(), retrieval.DefaultConfig())
-		logger.Info("retrieval ready", "mode", "keyword")
+		var embedder retrieval.Embedder
+		mode := "keyword"
+		if llmReg.HasEmbeddings() {
+			embedder = llmReg
+			mode = "hybrid"
+		}
+		retriever = retrieval.NewRetriever(st.DB, embedder, retrieval.NewMemoryCache(), retrieval.DefaultConfig())
+		srv.SetRetriever(retriever)
+		logger.Info("retrieval ready", "mode", mode, "embed_model", llmReg.EmbeddingModel())
+		if embedder != nil {
+			backfillLimit := envInt("OPENAI_EMBED_BACKFILL_LIMIT", 500)
+			if backfillLimit > 0 {
+				go backfillAIKBEmbeddings(ctx, logger, st, llmReg, backfillLimit)
+			}
+		}
 	} else {
 		logger.Warn("retrieval disabled (no LLM configured)")
 	}
@@ -459,6 +471,19 @@ func main() {
 	logger.Info("worker drained, bye")
 }
 
+func loadEnvOverrides() {
+	// Prefer the repo-local backend/.env when it exists so a stale shell
+	// OPENAI_API_KEY or other exported variable does not shadow the file the
+	// developer is actively editing.
+	for _, path := range []string{filepath.Join("backend", ".env"), ".env"} {
+		if _, err := os.Stat(path); err == nil {
+			_ = godotenv.Overload(path)
+			return
+		}
+	}
+	_ = godotenv.Load()
+}
+
 // newLogger returns a slog.Logger configured for the runtime environment.
 func newLogger(cfg *config.Config) *slog.Logger {
 	level := slog.LevelInfo
@@ -513,6 +538,18 @@ func envBool(key string, fallback bool) bool {
 	}
 }
 
+func envInt(key string, fallback int) int {
+	v := envOr(key, "")
+	if v == "" {
+		return fallback
+	}
+	var n int
+	if err := json.Unmarshal([]byte(v), &n); err != nil || n < 0 {
+		return fallback
+	}
+	return n
+}
+
 func bedrockEnvConfigured() bool {
 	if envOr("BEDROCK_BASE_URL", "") != "" && envOr("BEDROCK_API_KEY", "") != "" {
 		return true
@@ -528,4 +565,69 @@ func bedrockEnvConfigured() bool {
 		"AWS_EXECUTION_ENV",
 		"AWS_LAMBDA_FUNCTION_NAME",
 	) != ""
+}
+
+func backfillAIKBEmbeddings(ctx context.Context, logger *slog.Logger, st *store.Store, reg *llm.Registry, limit int) {
+	if reg == nil || !reg.HasEmbeddings() || limit <= 0 {
+		return
+	}
+	bctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	chunks, err := st.ListAIKBMissingEmbeddings(bctx, limit)
+	if err != nil {
+		logger.Warn("ai kb embedding backfill: list failed", "err", err)
+		return
+	}
+	if len(chunks) == 0 {
+		return
+	}
+
+	const batchSize = 64
+	embedded := 0
+	for start := 0; start < len(chunks); start += batchSize {
+		end := start + batchSize
+		if end > len(chunks) {
+			end = len(chunks)
+		}
+		batch := chunks[start:end]
+		texts := make([]string, 0, len(batch))
+		indexes := make([]int, 0, len(batch))
+		for i, chunk := range batch {
+			text := strings.TrimSpace(strings.TrimSpace(chunk.Title) + "\n\n" + strings.TrimSpace(chunk.Content))
+			if text == "" {
+				continue
+			}
+			texts = append(texts, text)
+			indexes = append(indexes, i)
+		}
+		if len(texts) == 0 {
+			continue
+		}
+		vecs, err := reg.Embed(bctx, texts)
+		if err != nil {
+			logger.Warn("ai kb embedding backfill: embed failed", "err", err, "count", len(texts))
+			for _, idx := range indexes {
+				chunk := batch[idx]
+				_ = st.MarkAIKBEmbeddingError(context.Background(), chunk.AdminUserID, chunk.ID, err.Error())
+			}
+			continue
+		}
+		for i, vec := range vecs {
+			if i >= len(indexes) {
+				break
+			}
+			chunk := batch[indexes[i]]
+			if len(vec) == 0 {
+				_ = st.MarkAIKBEmbeddingError(context.Background(), chunk.AdminUserID, chunk.ID, "embedding provider returned no vector")
+				continue
+			}
+			if err := st.SetAIKBEmbedding(context.Background(), chunk.AdminUserID, chunk.ID, reg.EmbeddingModel(), vec); err != nil {
+				_ = st.MarkAIKBEmbeddingError(context.Background(), chunk.AdminUserID, chunk.ID, err.Error())
+				continue
+			}
+			embedded++
+		}
+	}
+	logger.Info("ai kb embedding backfill complete", "embedded", embedded, "checked", len(chunks), "limit", limit)
 }

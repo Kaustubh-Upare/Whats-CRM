@@ -69,10 +69,16 @@ export default function Chats() {
     [convs.data, activeKey],
   )
 
-  // Auto-pick the first conversation on first load.
+  // Auto-pick the first visible conversation, and recover if the selected row
+  // disappeared or changed from phone-only to retailer-linked.
   useEffect(() => {
-    if (!activeKey && convs.data?.items?.length) {
-      setActiveKey(convKey(convs.data.items[0]))
+    const items = convs.data?.items || []
+    if (!items.length) {
+      if (activeKey) setActiveKey(null)
+      return
+    }
+    if (!activeKey || !items.some((c) => convKey(c) === activeKey)) {
+      setActiveKey(convKey(items[0]))
     }
   }, [convs.data, activeKey])
 
@@ -281,12 +287,12 @@ export default function Chats() {
         )}
       </AnimatePresence>
 
-      <div className="flex-1 px-3 sm:px-6 lg:px-8 pb-3 sm:pb-6 lg:pb-8 min-h-0">
-        <div className="grid grid-cols-1 md:grid-cols-[360px_1fr] gap-3 md:gap-4 h-full">
+      <div className="flex-1 px-3 sm:px-5 lg:px-8 pb-3 sm:pb-5 lg:pb-8 min-h-0">
+        <div className="admin-chat-split h-full lg:gap-4">
           {/* LEFT: conversation list — on phones, hidden when a thread is open
               so the user gets a full-bleed chat surface and taps "Back" to
               return to the list. */}
-          <aside className={`admin-card rounded-2xl flex flex-col overflow-hidden min-h-0 ${activeKey ? 'hidden md:flex' : 'flex'}`}>
+          <aside className={`admin-card rounded-2xl flex flex-col overflow-hidden min-h-0 ${activeKey ? 'max-sm:hidden sm:flex' : 'flex'}`}>
             {/* Search header */}
             <div className="p-4 border-b border-slate-100 dark:border-white/5
                             bg-gradient-to-b from-slate-50 to-white
@@ -336,7 +342,7 @@ export default function Chats() {
           </aside>
 
           {/* RIGHT: thread — hidden on phones until a conversation is picked. */}
-          <section className={`admin-card rounded-2xl flex flex-col overflow-hidden min-h-0 ${activeKey ? 'flex' : 'hidden md:flex'}`}>
+          <section className={`admin-card rounded-2xl flex flex-col overflow-hidden min-h-0 ${activeKey ? 'flex' : 'hidden sm:flex'}`}>
             {!active ? (
               <EmptyThread />
             ) : (

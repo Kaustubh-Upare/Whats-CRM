@@ -209,7 +209,7 @@ export default function BatchDetail() {
             )}
             {q.data?.batch.ai_followup_enabled && (
               <Link
-                to={`/admin/batches/${id}/ai-followup`}
+                to={`/admin/messages/bulk/batches/${id}/ai-followup`}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
                            text-emerald-700 dark:text-emerald-300
                            border border-emerald-200 dark:border-emerald-400/30
@@ -220,7 +220,7 @@ export default function BatchDetail() {
                 <Bot className="w-4 h-4" /> AI Follow-ups
               </Link>
             )}
-            <Link to="/admin/batches">
+            <Link to="/admin/messages/bulk/batches">
               <SecondaryButton><ArrowLeft className="w-4 h-4" /> All batches</SecondaryButton>
             </Link>
           </div>
@@ -240,7 +240,7 @@ export default function BatchDetail() {
                     <Spinner />
                   ) : activeTemplates.length === 0 ? (
                     <Link
-                      to="/admin/templates"
+                      to="/admin/messages/bulk/templates"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
                                  border border-amber-300 dark:border-amber-400/40
                                  bg-amber-50 dark:bg-amber-500/15
@@ -810,7 +810,7 @@ function FirstSendConfirmModal({
                 </label>
                 {templates.length === 0 ? (
                   <Link
-                    to="/admin/templates"
+                    to="/admin/messages/bulk/templates"
                     className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-400/40 dark:bg-amber-500/15 dark:text-amber-200"
                   >
                     <AlertTriangle className="w-4 h-4" /> Create a template first
@@ -1049,7 +1049,7 @@ function ResendBatchModal({
                   </label>
                   {templates.length === 0 ? (
                     <Link
-                      to="/admin/templates"
+                      to="/admin/messages/bulk/templates"
                       className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-400/40 dark:bg-amber-500/15 dark:text-amber-200"
                     >
                       <AlertTriangle className="w-4 h-4" /> Create a template first

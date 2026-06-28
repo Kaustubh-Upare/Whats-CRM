@@ -136,38 +136,35 @@ func (o *Orchestrator) HandleInbound(ctx context.Context, adminID int64, phone, 
 		slog.Error("orchestrator: bump counters", "err", err)
 	}
 
-	// 2. Skip if conversation is handed off.
-	if convStatus == "handed_off" {
-		slog.Info("orchestrator: conversation handed off, skipping", "conv", convID, "phone", phone)
-		return
+	batchID, err := o.resolveInboundBatchID(ctx, adminID, phone)
+	if err != nil {
+		slog.Warn("orchestrator: resolve inbound batch, using global agent", "err", err, "phone", phone)
 	}
 
-	// 3. Disabled-agent guard (global).
-	enabled, err := o.agentEnabled(ctx, adminID, nil)
+	// 2. Skip if conversation is handed off, except when this phone belongs to
+	// an active AI follow-up batch. In that case a stale/manual handoff should
+	// not permanently suppress the batch agent; the batch Disable AI control is
+	// the durable stop switch.
+	if convStatus == "handed_off" {
+		if batchID == nil {
+			slog.Info("orchestrator: conversation handed off, skipping", "conv", convID, "phone", phone)
+			return
+		}
+		if err := o.resumeBatchConversation(ctx, adminID, convID, *batchID, phone); err != nil {
+			slog.Error("orchestrator: resume handed-off batch conversation", "err", err, "conv", convID, "batch_id", *batchID)
+			return
+		}
+		slog.Info("orchestrator: resumed handed-off batch conversation", "conv", convID, "batch_id", *batchID, "phone", phone)
+	}
+
+	// 3. Disabled-agent guard for the effective agent.
+	enabled, err := o.agentEnabled(ctx, adminID, batchID)
 	if err != nil {
 		slog.Error("orchestrator: read agent enabled", "err", err)
 		return
 	}
 	if !enabled {
-		slog.Info("orchestrator: agent disabled, skipping", "conv", convID)
-		return
-	}
-
-	// 3a. Per-batch disable guard. If this phone has an explicit
-	// 'disabled' row in bc_batch_ai_recipients (admin toggled AI off
-	// for the batch after the conversation started), respect that
-	// and skip. A row in any other ai_status (pending, active,
-	// handed_off, opted_out, failed) does NOT block the reply —
-	// those carry legitimate conversation state and the global flag
-	// already controls whether the agent runs at all.
-	//
-	// A missing row (no toggle at all) returns false, so the legacy
-	// behaviour is preserved for batches that pre-date the per-batch
-	// toggle.
-	if disabled, derr := o.batchAIDisabledForPhone(ctx, adminID, phone); derr != nil {
-		slog.Warn("orchestrator: read per-batch disable, continuing", "err", derr)
-	} else if disabled {
-		slog.Info("orchestrator: per-batch AI disabled for phone, skipping", "conv", convID, "phone", phone)
+		slog.Info("orchestrator: agent disabled, skipping", "conv", convID, "batch_id", optionalInt64LogValue(batchID))
 		return
 	}
 
@@ -179,7 +176,7 @@ func (o *Orchestrator) HandleInbound(ctx context.Context, adminID int64, phone, 
 
 	// 6. Load the active agent before retrieval so agent-specific
 	// knowledge scopes are honored.
-	cfg, err := o.loadAgentConfig(ctx, adminID, nil)
+	cfg, err := o.loadAgentConfig(ctx, adminID, batchID)
 	if err != nil {
 		slog.Error("orchestrator: load agent config", "err", err)
 		return
@@ -196,7 +193,7 @@ func (o *Orchestrator) HandleInbound(ctx context.Context, adminID int64, phone, 
 
 	// 8. Build messages + system prompt + tool definitions.
 	system := withInlineHumanReviewInstructions(
-		BuildSystemPrompt(cfg, history, chunks, convID),
+		BuildSystemPrompt(cfg, history, chunks, convID, phone),
 		"Live inbound WhatsApp reply. If the AI can fully answer safely, set requires_review=false. If a human should inspect this phone, set requires_review=true with the reason and next action.",
 	)
 	toolDefs := o.registry.Definitions(adminID)
@@ -345,6 +342,110 @@ func (o *Orchestrator) getConversationStatus(ctx context.Context, adminID int64,
 	return s, err
 }
 
+func (o *Orchestrator) resumeBatchConversation(ctx context.Context, adminID, convID, batchID int64, phone string) error {
+	tx, err := o.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE bc_ai_conversation_states
+		SET status = 'active',
+		    handed_off_at = NULL,
+		    handoff_reason = NULL,
+		    updated_at = now()
+		WHERE id = $1
+		  AND admin_user_id = $2
+		  AND status = 'handed_off'
+	`, convID, adminID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE bc_batch_ai_recipients
+		SET ai_status = 'active',
+		    last_event = 'resumed from handoff by inbound message',
+		    last_event_at = now(),
+		    updated_at = now()
+		WHERE admin_user_id = $1
+		  AND batch_id = $2
+		  AND whatsapp_number = $3
+		  AND ai_status = 'handed_off'
+	`, adminID, batchID, strings.TrimSpace(phone))
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (o *Orchestrator) resolveInboundBatchID(ctx context.Context, adminID int64, phone string) (*int64, error) {
+	phone = strings.TrimSpace(phone)
+	if adminID <= 0 || phone == "" {
+		return nil, nil
+	}
+
+	var batchID int64
+	err := o.pool.QueryRow(ctx, `
+		WITH lead AS (
+			SELECT id
+			  FROM bc_crm_leads
+			 WHERE admin_user_id = $1
+			   AND phone = $2
+			 LIMIT 1
+		),
+		enrollment_batch AS (
+			SELECT e.source_batch_id AS batch_id,
+			       COALESCE(e.paused_at, e.next_run_at, e.created_at) AS sort_at,
+			       1 AS priority,
+			       e.id AS row_id
+			  FROM bc_crm_sequence_enrollments e
+			  JOIN lead l ON l.id = e.lead_id
+			  JOIN bc_upload_batches b
+			    ON b.id = e.source_batch_id
+			   AND (b.uploaded_by = $1 OR b.uploaded_by IS NULL)
+			 WHERE e.admin_user_id = $1
+			   AND e.mode IN ('ai_followup', 'agentic_followup')
+			   AND e.status IN ('active', 'paused')
+			   AND e.source_batch_id IS NOT NULL
+		),
+		recipient_batch AS (
+			SELECT r.batch_id,
+			       COALESCE(r.last_event_at, r.updated_at) AS sort_at,
+			       2 AS priority,
+			       r.id AS row_id
+			  FROM bc_batch_ai_recipients r
+			  JOIN bc_upload_batches b
+			    ON b.id = r.batch_id
+			   AND (b.uploaded_by = $1 OR b.uploaded_by IS NULL)
+			 WHERE r.admin_user_id = $1
+			   AND r.whatsapp_number = $2
+			   AND b.ai_followup_enabled = TRUE
+			   AND COALESCE(r.ai_status, 'pending') NOT IN ('excluded', 'opted_out', 'disabled')
+		)
+		SELECT batch_id
+		  FROM (
+			SELECT * FROM enrollment_batch
+			UNION ALL
+			SELECT * FROM recipient_batch
+		  ) candidates
+		 ORDER BY priority ASC, sort_at DESC NULLS LAST, row_id DESC
+		 LIMIT 1
+	`, adminID, phone).Scan(&batchID)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &batchID, nil
+}
+
 func (o *Orchestrator) agentEnabled(ctx context.Context, adminID int64, batchID *int64) (bool, error) {
 	row, _, err := o.ResolveAgentForCall(ctx, adminID, batchID)
 	if err != nil {
@@ -362,29 +463,34 @@ func (o *Orchestrator) agentEnabled(ctx context.Context, adminID int64, batchID 
 	return enabled, nil
 }
 
-// batchAIDisabledForPhone returns true iff there is at least one
-// bc_batch_ai_recipients row for (adminID, phone) with
-// ai_status = 'disabled'. Used by HandleInbound to honor an
-// admin's per-batch "off" decision without requiring them to also
-// disable the global agent.
-//
-// The check is intentionally soft: a missing row (no toggle at all)
-// returns false, so the legacy behaviour is preserved for batches
-// that pre-date the per-batch toggle.
+// batchAIDisabledForPhone returns true only when this phone has batch-AI
+// recipient rows, but none of its currently enabled batch rows are eligible for
+// AI. A phone can appear in old batches with ai_status='disabled'; those stale
+// rows must not suppress the active batch agent.
 func (o *Orchestrator) batchAIDisabledForPhone(ctx context.Context, adminID int64, phone string) (bool, error) {
-	var found bool
+	var hasRecipientRows, hasEligibleEnabledRow bool
 	err := o.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM bc_batch_ai_recipients
-			 WHERE admin_user_id = $1
-			   AND whatsapp_number = $2
-			   AND ai_status = 'disabled'
-		)
-	`, adminID, phone).Scan(&found)
+		SELECT
+			EXISTS (
+				SELECT 1
+				  FROM bc_batch_ai_recipients r
+				 WHERE r.admin_user_id = $1
+				   AND r.whatsapp_number = $2
+			),
+			EXISTS (
+				SELECT 1
+				  FROM bc_batch_ai_recipients r
+				  JOIN bc_upload_batches b ON b.id = r.batch_id
+				 WHERE r.admin_user_id = $1
+				   AND r.whatsapp_number = $2
+				   AND b.ai_followup_enabled = TRUE
+				   AND COALESCE(r.ai_status, 'pending') NOT IN ('disabled', 'excluded', 'opted_out', 'handed_off')
+			)
+	`, adminID, phone).Scan(&hasRecipientRows, &hasEligibleEnabledRow)
 	if err != nil {
 		return false, err
 	}
-	return found, nil
+	return hasRecipientRows && !hasEligibleEnabledRow, nil
 }
 
 // agentConfigRow is the slim shape the prompt builder needs from
@@ -425,11 +531,21 @@ func (o *Orchestrator) ResolveAgentForCall(ctx context.Context, adminID int64, b
 		}
 		if err == nil && agentID != nil {
 			var row agentConfigRow
+			var agentEnabled bool
 			scanErr := o.pool.QueryRow(ctx, `
-				SELECT name, persona_md, tone, system_prompt, faq_confidence_threshold
-				FROM bc_ai_agents WHERE id = $1 AND admin_user_id = $2
-			`, *agentID, adminID).Scan(&row.Name, &row.PersonaMd, &row.Tone, &row.SystemPrompt, &row.FAQConfidenceThresh)
+				SELECT enabled, name, persona_md, tone, system_prompt, faq_confidence_threshold
+				FROM bc_ai_agents
+				WHERE id = $1 AND admin_user_id = $2
+			`, *agentID, adminID).Scan(&agentEnabled, &row.Name, &row.PersonaMd, &row.Tone, &row.SystemPrompt, &row.FAQConfidenceThresh)
 			if scanErr == nil {
+				if !agentEnabled {
+					_, _ = o.pool.Exec(ctx, `
+						UPDATE bc_ai_agents
+						SET enabled = TRUE
+						WHERE id = $1 AND admin_user_id = $2
+					`, *agentID, adminID)
+					slog.Info("orchestrator: enabled disabled batch agent", "batch_id", *batchID, "agent_id", *agentID)
+				}
 				row.ID = *agentID
 				return row, "batch_override", nil
 			}
@@ -439,15 +555,41 @@ func (o *Orchestrator) ResolveAgentForCall(ctx context.Context, adminID int64, b
 			// Assigned agent was deleted — fall through to default.
 		}
 	}
-	// No batch override: use the admin's global default.
+	// No batch override: use an enabled default. For batch-owned inbound
+	// replies, wake the saved default if every agent is currently disabled;
+	// the batch AI toggle is the workflow stop switch.
 	var row agentConfigRow
 	err := o.pool.QueryRow(ctx, `
 		SELECT id, name, persona_md, tone, system_prompt, faq_confidence_threshold
 		FROM bc_ai_agents
-		WHERE admin_user_id = $1 AND is_default = TRUE
+		WHERE admin_user_id = $1 AND enabled = TRUE
+		ORDER BY is_default DESC, updated_at DESC, id DESC
 		LIMIT 1
 	`, adminID).Scan(&row.ID, &row.Name, &row.PersonaMd, &row.Tone, &row.SystemPrompt, &row.FAQConfidenceThresh)
 	if err == pgx.ErrNoRows {
+		if batchID != nil {
+			var defaultEnabled bool
+			err = o.pool.QueryRow(ctx, `
+				SELECT id, enabled, name, persona_md, tone, system_prompt, faq_confidence_threshold
+				FROM bc_ai_agents
+				WHERE admin_user_id = $1 AND is_default = TRUE
+				LIMIT 1
+			`, adminID).Scan(&row.ID, &defaultEnabled, &row.Name, &row.PersonaMd, &row.Tone, &row.SystemPrompt, &row.FAQConfidenceThresh)
+			if err == nil {
+				if !defaultEnabled {
+					_, _ = o.pool.Exec(ctx, `
+						UPDATE bc_ai_agents
+						SET enabled = TRUE
+						WHERE id = $1 AND admin_user_id = $2
+					`, row.ID, adminID)
+					slog.Info("orchestrator: enabled disabled default agent for batch", "batch_id", *batchID, "agent_id", row.ID)
+				}
+				return row, "global_default", nil
+			}
+			if err != pgx.ErrNoRows {
+				return agentConfigRow{}, "", err
+			}
+		}
 		return agentConfigRow{}, "none", nil
 	}
 	if err != nil {
@@ -640,6 +782,9 @@ func (o *Orchestrator) markWhatsAppCredentialError(ctx context.Context, adminID 
 	if adminID <= 0 || sendErr == nil {
 		return nil
 	}
+	if !looksLikeWhatsAppAuthError(sendErr.Error()) {
+		return nil
+	}
 	_, err := o.pool.Exec(ctx, `
 		UPDATE bc_whatsapp_credentials
 		SET is_verified = false,
@@ -649,6 +794,18 @@ func (o *Orchestrator) markWhatsAppCredentialError(ctx context.Context, adminID 
 		WHERE admin_user_id = $1 AND removed_at IS NULL
 	`, adminID, compactError(sendErr.Error()))
 	return err
+}
+
+func looksLikeWhatsAppAuthError(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return false
+	}
+	return strings.Contains(s, "status=401") ||
+		strings.Contains(s, `"code":190`) ||
+		strings.Contains(s, "authentication error") ||
+		strings.Contains(s, "oauth") ||
+		strings.Contains(s, "invalid access token")
 }
 
 func conversationKey(phone string) string {
@@ -671,6 +828,13 @@ func compactError(s string) string {
 		return s
 	}
 	return strings.TrimSpace(string(runes[:1000]))
+}
+
+func optionalInt64LogValue(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // send is a thin wrapper around Sender so we can add retries later.
