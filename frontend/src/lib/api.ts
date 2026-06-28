@@ -36,8 +36,21 @@ api.interceptors.request.use((cfg) => {
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err?.response?.status === 401 && !location.pathname.startsWith('/login')) {
+    const pathname = location.pathname
+    const requestURL = String(err?.config?.url || '')
+    const isAuthProbe = requestURL.includes('/auth/me')
+    const isPublicPage = (
+      pathname === '/' ||
+      pathname === '/pricing' ||
+      pathname === '/how-it-works' ||
+      pathname.startsWith('/login')
+    )
+
+    if (err?.response?.status === 401) {
       setToken(null)
+    }
+
+    if (err?.response?.status === 401 && !isAuthProbe && !isPublicPage) {
       location.href = '/login'
     }
     return Promise.reject(err)

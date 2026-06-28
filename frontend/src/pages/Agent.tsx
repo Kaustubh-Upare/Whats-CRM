@@ -263,12 +263,8 @@ function AgentListRow({
           </PillPop>
         )}
       </div>
-      <div className="flex items-center gap-2 mt-1.5">
-        <span className="inline-flex items-center gap-1 rounded bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 text-[11px] text-slate-600 dark:text-slate-300">
-          <span className="text-slate-400 dark:text-slate-500">Model</span>
-          <span className="font-mono">{agent.primary_model || 'default'}</span>
-        </span>
-        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="mt-1.5 flex items-center justify-end">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           {!agent.is_default && (
             <button
               type="button"
@@ -999,8 +995,7 @@ function TestResultView({ result }: { result: TestAgentResult }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <Metric label="Model" value={result.model} mono />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Metric label="Tier" value={result.tier} />
         <Metric label="Tokens" value={`${result.tokens_in} / ${result.tokens_out}`} mono />
         <Metric label="Cost" value={`$${result.cost_usd.toFixed(6)}`} mono />

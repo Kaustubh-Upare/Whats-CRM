@@ -45,8 +45,6 @@ const navAI: NavItem[] = [
   { to: '/admin/ai/conversations',  label: 'Conversations', icon: MessagesSquare, title: 'Conversations' },
   { to: '/admin/ai/followups',      label: 'Follow-ups', icon: BellRing,        title: 'AI Follow-ups' },
   { to: '/admin/ai/human-review',   label: 'Human Review', icon: UserCheck,     title: 'Human Review' },
-  { to: '/admin/ai/ai-followup-crm', label: 'AI CRM',    icon: BarChart3,       title: 'AI CRM' },
-  { to: '/admin/ai/crm/leads',      label: 'CRM Leads',  icon: Users,           title: 'CRM Leads' },
 ]
 
 const NAV_BY_WORKSPACE: Record<WorkspaceId, NavItem[]> = {
@@ -64,10 +62,7 @@ const overflowRoutesBulk: NavItem[] = [
   { to: '/admin/messages/bulk/credentials',  label: 'Credentials',  icon: KeyRound },
   { to: '/admin/messages/bulk/reports',      label: 'Reports',      icon: BarChart3 },
 ]
-const overflowRoutesAI: NavItem[] = [
-  { to: '/admin/ai/crm/pipelines', label: 'CRM Pipelines', icon: Layers },
-  { to: '/admin/ai/crm/sequences', label: 'CRM Sequences', icon: Send },
-]
+const overflowRoutesAI: NavItem[] = []
 const OVERFLOW_BY_WORKSPACE: Record<WorkspaceId, NavItem[]> = {
   bulk: overflowRoutesBulk,
   ai: overflowRoutesAI,

@@ -100,11 +100,6 @@ export default function AIHumanReview() {
             <SecondaryButton onClick={() => q.refetch()}>
               <RefreshCw className={`w-4 h-4 ${q.isFetching ? 'animate-spin' : ''}`} /> Refresh
             </SecondaryButton>
-            <Link to="/admin/ai/ai-followup-crm">
-              <SecondaryButton>
-                <Sparkles className="w-4 h-4" /> AI CRM
-              </SecondaryButton>
-            </Link>
           </div>
         }
       />

@@ -3,6 +3,7 @@ import Layout from '@/components/Layout'
 import Login from '@/pages/Login'
 import Landing from '@/pages/Landing'
 import HowItWorks from '@/pages/HowItWorks'
+import Pricing from '@/pages/Pricing'
 import Dashboard from '@/pages/Dashboard'
 import WorkspaceRoot from '@/pages/WorkspaceRoot'
 import Upload from '@/pages/Upload'
@@ -80,6 +81,7 @@ export default function App() {
       {/* Public marketing pages */}
       <Route path="/" element={<RootIndex />} />
       <Route path="/how-it-works" element={<HowItWorks />} />
+      <Route path="/pricing" element={<Pricing />} />
       <Route path="/login" element={<Login />} />
 
       {/* Protected admin console (everything under /admin/*).
