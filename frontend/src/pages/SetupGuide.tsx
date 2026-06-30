@@ -9,6 +9,9 @@ import {
 } from 'lucide-react'
 import { PageHeader, PrimaryButton, SecondaryButton } from '@/components/ui'
 
+const PRODUCTION_WEBHOOK_URL = 'https://whatsitc.ddns.net/api/webhook/whatsapp'
+const WEBHOOK_VERIFY_TOKEN = 'WhatsuppVerifiedTokenTest'
+
 /* ────────────────────────────────────────────────────────────────────── */
 /*  Shared chrome (copied from HowItWorks.tsx for the same look + feel)  */
 /* ────────────────────────────────────────────────────────────────────── */
@@ -1066,17 +1069,107 @@ function TokenMock() {
 /*  Final checklist + closing CTA                                          */
 /* ────────────────────────────────────────────────────────────────────── */
 
+function CopyValueLine({
+  label,
+  value,
+  hint,
+}: {
+  label: string
+  value: string
+  hint: string
+}) {
+  return (
+    <div className="rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-100/80">{label}</div>
+          <div className="mt-2 rounded-xl bg-black/20 px-3 py-2 font-mono text-sm font-semibold text-white break-all">
+            {value}
+          </div>
+          <div className="mt-2 text-xs leading-5 text-emerald-50/80">{hint}</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigator.clipboard?.writeText(value)}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/25 bg-white/15 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/25"
+        >
+          <Copy className="h-3.5 w-3.5" /> Copy
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function WebhookSetupSection() {
+  return (
+    <section className="relative max-w-6xl mx-auto mt-24 lg:mt-32">
+      <div className="relative overflow-hidden rounded-3xl border border-emerald-200/70 bg-slate-950 p-8 text-white shadow-2xl lg:p-12 dark:border-white/10">
+        <div aria-hidden className="absolute inset-0 opacity-80">
+          <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-emerald-400/30 blur-3xl" />
+          <div className="absolute -bottom-28 left-10 h-72 w-72 rounded-full bg-cyan-400/20 blur-3xl" />
+          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(16,185,129,0.14),transparent_38%,rgba(14,165,233,0.12))]" />
+        </div>
+        <NoiseOverlay />
+
+        <div className="relative grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-center">
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+              <Webhook className="h-3.5 w-3.5" /> Step 05 · Webhook
+            </span>
+            <h2 className="mt-5 text-3xl font-semibold tracking-tight lg:text-4xl">
+              Add the webhook callback in Meta.
+            </h2>
+            <p className="mt-4 max-w-xl text-sm leading-7 text-slate-300">
+              In Meta WhatsApp configuration, open <strong className="text-white">Webhooks</strong>, paste the callback URL,
+              enter the verify token exactly as shown, then subscribe to <strong className="text-white">messages</strong>.
+            </p>
+            <div className="mt-5 grid gap-2 text-sm text-slate-300">
+              <div className="inline-flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+                Use HTTPS only. Meta will reject plain HTTP.
+              </div>
+              <div className="inline-flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+                The token must match the value saved in WhatsyITC credentials.
+              </div>
+              <div className="inline-flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+                After verify succeeds, subscribe the WhatsApp Business Account to message events.
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <CopyValueLine
+              label="Callback URL"
+              value={PRODUCTION_WEBHOOK_URL}
+              hint="Paste this into Meta's Callback URL field."
+            />
+            <CopyValueLine
+              label="Verify token"
+              value={WEBHOOK_VERIFY_TOKEN}
+              hint="Paste this into Meta's Verify token field and also save it in WhatsyITC credentials."
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function FinalChecklist() {
   const fields = [
     { k: 'Phone Number ID', from: 'Step 03', value: '1025607483965144', tone: 'violet' },
     { k: 'WABA ID (optional)', from: 'Step 02', value: '123456789012345', tone: 'emerald' },
     { k: 'Access Token',     from: 'Step 04', value: 'EAAJ9z7XQ2b8K4pL1mNvT0sR3yF…', tone: 'rose' },
-    { k: 'Verify Token',     from: 'You make it up', value: 'any-random-string', tone: 'amber' },
+    { k: 'Webhook URL',      from: 'Step 05', value: PRODUCTION_WEBHOOK_URL, tone: 'blue' },
+    { k: 'Verify Token',     from: 'Step 05', value: WEBHOOK_VERIFY_TOKEN, tone: 'amber' },
     { k: 'API version',      from: 'Step 04', value: 'v25.0', tone: 'sky' },
   ]
   const toneMap: Record<string, string> = {
     emerald: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300',
     sky:     'bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300',
+    blue:    'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300',
     violet:  'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300',
     amber:   'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300',
     rose:    'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-300',
@@ -1151,7 +1244,8 @@ function FinalChecklist() {
               <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
               <span>
                 The <code className="bg-black/20 px-1 rounded">Access Token</code> is shown only once by Meta — copy it before you close that tab. The{' '}
-                <code className="bg-black/20 px-1 rounded">Verify Token</code> is any string you invent; just make sure it matches what you set in the Meta webhook.
+                <code className="bg-black/20 px-1 rounded">Verify Token</code> must be exactly{' '}
+                <code className="bg-black/20 px-1 rounded">{WEBHOOK_VERIFY_TOKEN}</code> in both Meta and WhatsyITC.
               </span>
             </div>
           </div>
@@ -1286,6 +1380,8 @@ export default function SetupGuide() {
         mock={<TokenMock />}
         reversed
       />
+
+      <WebhookSetupSection />
 
       <FinalChecklist />
 

@@ -22,6 +22,7 @@ import {
   type ListFollowupsParams,
 } from '@/lib/batchAI'
 import { api } from '@/lib/api'
+import { AISetupGuideButton } from '@/components/AISetupGuide'
 import type {
   BatchAIFollowupDuplicate, BatchAIRecipient, BatchFollowupConfig,
   FollowupBehavior, FollowupTone, StartBatchFollowupOpts,
@@ -279,6 +280,7 @@ export default function Followups() {
         subtitle="Open a batch to manage its AI assistant, knowledge, recipients, timeline, and next follow-up plan."
         right={
           <div className="flex items-center gap-2">
+            <AISetupGuideButton guide="followups" />
             <AIFollowupStatusCounts counts={counts} />
             <button
               type="button"

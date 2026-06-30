@@ -21,6 +21,7 @@ import {
   addKB, aiKeys, deleteKB, editKB, getKBImportJob, ingestKBURL, listKB, searchKB, startKBImport,
   type KBImportJob,
 } from '@/lib/ai'
+import { AISetupGuideButton } from '@/components/AISetupGuide'
 import { KB_PRESETS, KB_PRESET_CATEGORIES, type KBPreset, type KBPresetCategoryId } from '@/lib/kbPresets'
 import type { KBChunk, RetrievedChunk, SearchKBResult } from '@/lib/types'
 
@@ -169,6 +170,7 @@ export default function Knowledge() {
       <PageHeader
         title="Knowledge base"
         subtitle="Content the AI grounds its answers in. Hybrid retrieval = vector + keyword."
+        right={<AISetupGuideButton guide="knowledge" />}
       />
 
       <HeroBanner

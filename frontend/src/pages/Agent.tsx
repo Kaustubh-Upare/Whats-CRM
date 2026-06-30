@@ -25,6 +25,7 @@ import {
   updateAIAgentKnowledge,
 } from '@/lib/ai'
 import type { AIAgentConfig, KBChunk, RetrievedChunk, TestAgentResult } from '@/lib/types'
+import { AISetupGuideButton } from '@/components/AISetupGuide'
 
 /**
  * /admin/ai/agent — multi-agent management page (Phase 8).
@@ -74,6 +75,7 @@ export default function Agent() {
       <PageHeader
         title="Agents"
         subtitle="Create multiple agents and pick which one handles each batch. The global default is used for live chat and unattached batches."
+        right={<AISetupGuideButton guide="agent" />}
       />
 
       {list.isLoading ? <Spinner /> :

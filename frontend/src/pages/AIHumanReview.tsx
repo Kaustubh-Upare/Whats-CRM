@@ -14,6 +14,7 @@ import {
 } from '@/lib/batchAI'
 import type { AIHumanReviewItem } from '@/lib/types'
 import { fmtRelative } from '@/lib/format'
+import { AISetupGuideButton } from '@/components/AISetupGuide'
 
 type ReasonFilter = 'all' | 'send_failed' | 'human_needed' | 'buyer_replied' | 'price_question' | 'hot_lead' | 'complaint' | 'first_touch_due'
 type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low'
@@ -97,6 +98,7 @@ export default function AIHumanReview() {
         subtitle="Phones where AI follow-ups need a person: buyer replies, handoffs, failed sends, price questions, complaints, and overdue first touches."
         right={
           <div className="flex items-center gap-2">
+            <AISetupGuideButton guide="human-review" />
             <SecondaryButton onClick={() => q.refetch()}>
               <RefreshCw className={`w-4 h-4 ${q.isFetching ? 'animate-spin' : ''}`} /> Refresh
             </SecondaryButton>

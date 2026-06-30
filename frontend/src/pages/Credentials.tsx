@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom'
 import {
   Save, RefreshCcw, Trash2, ShieldCheck, AlertTriangle, RotateCcw,
   History, CheckCircle2, ChevronRight, BookOpen, Phone, KeyRound, Clock3,
-  Bot, Sparkles,
+  Bot, Sparkles, Copy,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Card, CardHeader, ErrorBox, PageHeader, Spinner, GlassCard } from '@/components/ui'
@@ -17,6 +17,8 @@ import {
 import { aiKeys, listAIAgents } from '@/lib/ai'
 import type { CredentialsHistoryEntry, WhatsappSettings } from '@/lib/types'
 import { fmtRelative } from '@/lib/format'
+
+const DEFAULT_WEBHOOK_VERIFY_TOKEN = 'WhatsuppVerifiedTokenTest'
 
 export default function Credentials() {
   return (
@@ -334,6 +336,46 @@ function WhatsappCredentialsCard() {
           }
           sub="Must match the token you configure in the Meta webhook settings."
         />
+
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-3 text-xs text-emerald-950 dark:border-emerald-400/25 dark:bg-emerald-500/10 dark:text-emerald-100">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="font-semibold">Meta webhook verify token</div>
+              <div className="mt-1 text-emerald-800/80 dark:text-emerald-200/80">
+                Paste this exact value into Meta when verifying the webhook callback.
+              </div>
+              <div className="mt-2 inline-flex max-w-full items-center rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 font-mono text-[12px] font-semibold text-emerald-950 dark:border-emerald-400/20 dark:bg-slate-950/40 dark:text-emerald-100">
+                <span className="truncate">{DEFAULT_WEBHOOK_VERIFY_TOKEN}</span>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(DEFAULT_WEBHOOK_VERIFY_TOKEN)
+                    toast.success('Verify token copied')
+                  } catch {
+                    toast.error('Could not copy token')
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50 dark:border-emerald-400/30 dark:bg-white/[0.04] dark:text-emerald-100 dark:hover:bg-emerald-500/15"
+              >
+                <Copy className="h-3.5 w-3.5" /> Copy
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setVerifyToken(DEFAULT_WEBHOOK_VERIFY_TOKEN)
+                  toast.success('Verify token filled')
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500"
+              >
+                Use this token
+              </button>
+            </div>
+          </div>
+        </div>
 
         <Field k="API version" v={
           <input type="text" value={apiVersion} onChange={(e) => setApiVersion(e.target.value)}
