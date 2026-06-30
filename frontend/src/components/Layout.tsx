@@ -13,7 +13,7 @@ import { useAuth } from '@/lib/useAuth'
 import { useMediaQuery } from '@/lib/useMediaQuery'
 import {
   useWorkspace, WORKSPACE_ORDER, WORKSPACES,
-  workspaceFromPath, type WorkspaceId,
+  explicitWorkspaceFromPath, type WorkspaceId,
 } from '@/lib/workspace'
 
 // ---------------------------------------------------------------------------
@@ -40,6 +40,7 @@ const navBulk: NavItem[] = [
  *  human review queue, and the AI CRM surfaces. */
 const navAI: NavItem[] = [
   { to: '/admin/ai',                label: 'Dashboard',  icon: LayoutDashboard, title: 'AI Dashboard' },
+  { to: '/admin/ai/users',          label: 'Users',      icon: Users,           title: 'AI Users' },
   { to: '/admin/ai/agent',          label: 'Agent',      icon: Bot,             title: 'AI Agent' },
   { to: '/admin/ai/knowledge',      label: 'Knowledge',  icon: FileText,        title: 'Knowledge' },
   { to: '/admin/ai/conversations',  label: 'Conversations', icon: MessagesSquare, title: 'Conversations' },
@@ -90,7 +91,10 @@ export default function Layout() {
   const navigate = useNavigate()
   const outlet = useOutlet()
   const { user: me } = useAuth()
-  const { active, setActive, current: activeWorkspace } = useWorkspace()
+  const { active, setActive } = useWorkspace()
+  const routeWorkspace = explicitWorkspaceFromPath(location.pathname)
+  const visibleActive = routeWorkspace ?? active
+  const visibleWorkspace = WORKSPACES[visibleActive]
 
   // ≥1024 px = full sidebar; otherwise icon rail (72 px) + (below 640 px) top bar.
   const isWide = useMediaQuery('(min-width: 1024px)', true)
@@ -102,8 +106,8 @@ export default function Layout() {
   // true: navigating within a workspace doesn't bump you back to the
   // default after a refresh.
   useEffect(() => {
-    const fromPath = workspaceFromPath(location.pathname)
-    if (fromPath !== active) setActive(fromPath)
+    const fromPath = explicitWorkspaceFromPath(location.pathname)
+    if (fromPath && fromPath !== active) setActive(fromPath)
     // Intentionally only depend on pathname — re-running on `active`
     // would loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -127,12 +131,13 @@ export default function Layout() {
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef<HTMLDivElement | null>(null)
   const [humanReviewCount, setHumanReviewCount] = useState(0)
+  const [aiAgentReady, setAIAgentReady] = useState<boolean | null>(null)
 
   // Only poll the human-review endpoint while the AI workspace is active
   // (that's the only place the badge renders). Saves one round-trip /
   // 30s for users who spend most of their time on Bulk Messages.
   useEffect(() => {
-    if (active !== 'ai') {
+    if (visibleActive !== 'ai') {
       setHumanReviewCount(0)
       return
     }
@@ -152,7 +157,32 @@ export default function Layout() {
       alive = false
       window.clearInterval(t)
     }
-  }, [active])
+  }, [visibleActive])
+
+  useEffect(() => {
+    if (!me || me.whatsapp_configured !== true) {
+      setAIAgentReady(null)
+      return
+    }
+    let alive = true
+    const load = () => {
+      api.get('/api/ai/agents')
+        .then(({ data }) => {
+          if (!alive) return
+          const agents = Array.isArray(data) ? data : []
+          setAIAgentReady(agents.some((agent) => !!agent?.enabled))
+        })
+        .catch(() => {
+          if (alive) setAIAgentReady(null)
+        })
+    }
+    load()
+    const t = window.setInterval(load, 30_000)
+    return () => {
+      alive = false
+      window.clearInterval(t)
+    }
+  }, [me?.whatsapp_configured])
 
   // Overflow outside-click handler — kept outside the AI-only block so it
   // works on the Bulk workspace too.
@@ -176,13 +206,13 @@ export default function Layout() {
    *  the dashboard rather than the previous page so the user lands on
    *  a sensible default after toggling. */
   function switchWorkspace(id: WorkspaceId) {
-    if (id === active) return
+    if (id === visibleActive) return
     setActive(id)
     navigate(WORKSPACES[id].basePath)
   }
 
-  const nav = useMemo(() => NAV_BY_WORKSPACE[active], [active])
-  const overflowRoutes = useMemo(() => OVERFLOW_BY_WORKSPACE[active], [active])
+  const nav = useMemo(() => NAV_BY_WORKSPACE[visibleActive], [visibleActive])
+  const overflowRoutes = useMemo(() => OVERFLOW_BY_WORKSPACE[visibleActive], [visibleActive])
   const title = pageTitle(location.pathname, nav)
 
   return (
@@ -268,7 +298,7 @@ export default function Layout() {
           >
             {WORKSPACE_ORDER.map((id) => {
               const ws = WORKSPACES[id]
-              const isActive = id === active
+              const isActive = id === visibleActive
               return (
                 <button
                   key={id}
@@ -445,15 +475,15 @@ export default function Layout() {
                 sidebar switcher, kept small so it fits the top bar. */}
             <button
               type="button"
-              onClick={() => switchWorkspace(active === 'ai' ? 'bulk' : 'ai')}
-              aria-label={`Switch to ${active === 'ai' ? 'Bulk Messages' : 'AI Workflows'} workspace`}
+              onClick={() => switchWorkspace(visibleActive === 'ai' ? 'bulk' : 'ai')}
+              aria-label={`Switch to ${visibleActive === 'ai' ? 'Bulk Messages' : 'AI Workflows'} workspace`}
               className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium
                          bg-slate-100 dark:bg-white/10
                          text-slate-700 dark:text-slate-200
                          hover:bg-slate-200 dark:hover:bg-white/20 transition-colors"
             >
-              {active === 'ai' ? <Sparkles className="w-3 h-3" /> : <Send className="w-3 h-3" />}
-              <span>{activeWorkspace.shortLabel}</span>
+              {visibleActive === 'ai' ? <Sparkles className="w-3 h-3" /> : <Send className="w-3 h-3" />}
+              <span>{visibleWorkspace.shortLabel}</span>
             </button>
             {/* Global Settings — accessible from any workspace. */}
             <NavLink
@@ -536,6 +566,27 @@ export default function Layout() {
               className="ml-auto inline-flex items-center gap-1 px-3 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium"
             >
               Configure now →
+            </Link>
+          </motion.div>
+        )}
+        {me && me.whatsapp_configured === true && aiAgentReady === false && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+            className="bg-sky-50 dark:bg-sky-500/15
+                       border-b border-sky-200 dark:border-sky-500/30
+                       px-4 sm:px-6 py-2.5 text-sky-950 dark:text-sky-100 text-sm flex items-center gap-2"
+          >
+            <Bot className="w-4 h-4 shrink-0" />
+            <span className="truncate">
+              WhatsApp is connected. Create and enable an AI agent before automatic replies or follow-up LLM calls run.
+            </span>
+            <Link
+              to="/admin/ai/agent"
+              className="ml-auto inline-flex items-center gap-1 px-3 py-1 rounded-md bg-sky-700 hover:bg-sky-800 text-white text-xs font-medium"
+            >
+              Setup agent →
             </Link>
           </motion.div>
         )}

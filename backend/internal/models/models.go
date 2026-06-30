@@ -80,6 +80,40 @@ type Retailer struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
+type AIUser struct {
+	ID             int64             `json:"id"`
+	RetailerID     int64             `json:"retailer_id"`
+	RetailerCode   string            `json:"retailer_code"`
+	Name           string            `json:"name"`
+	Phone          string            `json:"phone"`
+	City           *string           `json:"city,omitempty"`
+	State          *string           `json:"state,omitempty"`
+	IsOptedOut     bool              `json:"is_opted_out"`
+	Source         string            `json:"source"`
+	ExtraFields    map[string]string `json:"extra_fields"`
+	LastImportedAt *time.Time        `json:"last_imported_at,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+}
+
+type AIUserImportError struct {
+	Row     int    `json:"row"`
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+type AIUserFollowupResult struct {
+	User          AIUser  `json:"user"`
+	BatchID       int64   `json:"batch_id"`
+	RecipientID   int64   `json:"recipient_id"`
+	EnrollmentIDs []int64 `json:"enrollment_ids"`
+	SequenceIDs   []int64 `json:"sequence_ids"`
+	Count         int     `json:"count"`
+	AlreadyActive bool    `json:"already_active"`
+	RedirectURL   string  `json:"redirect_url"`
+	Message       string  `json:"message"`
+}
+
 type ValidationError struct {
 	Field   string `json:"field"`
 	Code    string `json:"code"`
@@ -557,6 +591,76 @@ type AIHumanReviewList struct {
 	Items []AIHumanReviewItem `json:"items"`
 	Total int                 `json:"total"`
 	Stats AIHumanReviewStats  `json:"stats"`
+}
+
+type AIWorkflowState struct {
+	ID                 int64           `json:"id"`
+	AdminUserID        int64           `json:"-"`
+	BatchID            *int64          `json:"batch_id,omitempty"`
+	BatchAIRecipientID int64           `json:"batch_ai_recipient_id"`
+	ConversationID     *int64          `json:"conversation_id,omitempty"`
+	RetailerID         *int64          `json:"retailer_id,omitempty"`
+	Phone              string          `json:"phone"`
+	RetailerName       string          `json:"retailer_name"`
+	BatchName          string          `json:"batch_name"`
+	State              string          `json:"state"`
+	StateLabel         string          `json:"state_label"`
+	StateReason        string          `json:"state_reason"`
+	NextAction         string          `json:"next_action"`
+	NextMessagePreview string          `json:"next_message_preview"`
+	ConfidenceScore    int             `json:"confidence_score"`
+	RiskLevel          string          `json:"risk_level"`
+	BuyerIntent        string          `json:"buyer_intent"`
+	KnowledgeMatched   bool            `json:"knowledge_matched"`
+	KnowledgeRefs      []string        `json:"knowledge_refs"`
+	Quality            map[string]any  `json:"quality"`
+	Source             string          `json:"source"`
+	LastMessageAt      *time.Time      `json:"last_message_at,omitempty"`
+	LastEventAt        *time.Time      `json:"last_event_at,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+	RecentDecisions    []AIDecisionLog `json:"recent_decisions,omitempty"`
+}
+
+type AIDecisionLog struct {
+	ID                 int64          `json:"id"`
+	AdminUserID        int64          `json:"-"`
+	WorkflowStateID    *int64         `json:"workflow_state_id,omitempty"`
+	BatchID            *int64         `json:"batch_id,omitempty"`
+	BatchAIRecipientID *int64         `json:"batch_ai_recipient_id,omitempty"`
+	ConversationID     *int64         `json:"conversation_id,omitempty"`
+	Phone              string         `json:"phone"`
+	DecisionType       string         `json:"decision_type"`
+	Title              string         `json:"title"`
+	Reason             string         `json:"reason"`
+	KnowledgeRefs      []string       `json:"knowledge_refs"`
+	NextAction         string         `json:"next_action"`
+	Quality            map[string]any `json:"quality"`
+	Model              string         `json:"model"`
+	Provider           string         `json:"provider"`
+	Source             string         `json:"source"`
+	CreatedAt          time.Time      `json:"created_at"`
+}
+
+type AIWorkflowStats struct {
+	Total              int            `json:"total"`
+	New                int            `json:"new"`
+	AITalking          int            `json:"ai_talking"`
+	BuyerReplied       int            `json:"buyer_replied"`
+	NeedsHuman         int            `json:"needs_human"`
+	FollowupScheduled  int            `json:"followup_scheduled"`
+	Paused             int            `json:"paused"`
+	Closed             int            `json:"closed"`
+	ActionRequired     int            `json:"action_required"`
+	HighRisk           int            `json:"high_risk"`
+	AvgConfidenceScore int            `json:"avg_confidence_score"`
+	ByState            map[string]int `json:"by_state"`
+}
+
+type AIWorkflowList struct {
+	Items []AIWorkflowState `json:"items"`
+	Total int               `json:"total"`
+	Stats AIWorkflowStats   `json:"stats"`
 }
 
 // BatchFollowupConfig is the request body for

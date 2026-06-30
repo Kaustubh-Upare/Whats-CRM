@@ -29,11 +29,32 @@ type UploadResp = {
   file_path: string
 }
 
+type UploadInspectResp = {
+  headers: string[]
+  sample_rows: Record<string, string>[]
+  total_rows: number
+  file_name: string
+}
+
+type UploadMappingState = {
+  phone: string
+  name: string
+  retailer_code: string
+  invoice_number: string
+  billing_amount: string
+  due_date: string
+  payment_link: string
+  language: string
+  template_vars: Record<string, string>
+}
+
 export default function Upload() {
   const nav = useNavigate()
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<UploadResp | null>(null)
   const [previewRow, setPreviewRow] = useState<number | null>(null)
+  const [templateKey, setTemplateKey] = useState('')
+  const [mapping, setMapping] = useState<UploadMappingState>(emptyUploadMapping())
   // We need to refresh the result view's local "enabled" state from
   // the server if a GET comes back with a different value (e.g.
   // another tab toggled it, or the server rejected a PUT). The
@@ -63,13 +84,37 @@ export default function Upload() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'text/csv': ['.csv'] },
     multiple: false,
-    onDrop: (files) => setFile(files[0] || null),
+    onDrop: (files) => {
+      setFile(files[0] || null)
+      setMapping(emptyUploadMapping())
+      inspect.reset()
+    },
+  })
+
+  const inspect = useMutation({
+    mutationFn: async () => {
+      const fd = new FormData()
+      fd.append('file', file!)
+      const { data } = await api.post('/api/batches/inspect-upload', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return data as UploadInspectResp
+    },
+    onSuccess: (data) => {
+      const vars = activeTemplate ? extractTemplateVars(activeTemplate.body) : []
+      setMapping(suggestUploadMapping(data.headers, vars))
+      toast.success(`Found ${data.headers.length} columns and ${data.total_rows} rows`)
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.error || 'Could not read columns'),
   })
 
   const upload = useMutation({
     mutationFn: async () => {
       const fd = new FormData()
       fd.append('file', file!)
+      if (inspect.data) {
+        fd.append('mapping', JSON.stringify(mapping))
+      }
       const { data } = await api.post('/api/batches/upload', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
@@ -87,13 +132,26 @@ export default function Upload() {
     queryKey: ['templates'],
     queryFn: async () => (await api.get('/api/templates')).data as Template[],
   })
+  const activeTemplates = useMemo(() => (templates.data || []).filter((t) => t.is_active), [templates.data])
+  useEffect(() => {
+    if (templateKey || activeTemplates.length === 0) return
+    setTemplateKey(templateValue(activeTemplates[0]))
+  }, [activeTemplates, templateKey])
   const activeTemplate = useMemo(
-    () => (templates.data || []).find((t) => t.is_active) || null,
-    [templates.data],
+    () => activeTemplates.find((t) => templateValue(t) === templateKey) || activeTemplates[0] || null,
+    [activeTemplates, templateKey],
+  )
+  const templateVars = useMemo(
+    () => activeTemplate ? extractTemplateVars(activeTemplate.body) : [],
+    [activeTemplate],
+  )
+  const missingTemplateVars = useMemo(
+    () => templateVars.filter((v) => !mapping.template_vars[v]),
+    [templateVars, mapping.template_vars],
   )
 
   function reset() {
-    setFile(null); setResult(null); setPreviewRow(null)
+    setFile(null); setResult(null); setPreviewRow(null); setMapping(emptyUploadMapping()); inspect.reset()
   }
 
   function downloadErrors() {
@@ -173,13 +231,17 @@ export default function Upload() {
 
               <div className="mt-5 flex gap-3 items-center flex-wrap">
                 <PrimaryButton
-                  onClick={() => upload.mutate()}
-                  disabled={!file || upload.isPending}
+                  onClick={() => inspect.data ? upload.mutate() : inspect.mutate()}
+                  disabled={!file || upload.isPending || inspect.isPending || (inspect.data ? !mapping.phone : false)}
                 >
-                  {upload.isPending ? (
+                  {inspect.isPending ? (
+                    <><Spinner /> Reading columns...</>
+                  ) : upload.isPending ? (
                     <><Spinner /> Validating…</>
+                  ) : inspect.data ? (
+                    <><Sparkles className="w-4 h-4" /> Validate with mapping</>
                   ) : (
-                    <><Sparkles className="w-4 h-4" /> Validate file</>
+                    <><Sparkles className="w-4 h-4" /> Read columns</>
                   )}
                 </PrimaryButton>
                 <a href="/sample-billing-template.xlsx" download
@@ -192,27 +254,80 @@ export default function Upload() {
                   </button>
                 )}
               </div>
+              {inspect.data && activeTemplate && (
+                <SmartMappingPanel
+                  inspect={inspect.data}
+                  template={activeTemplate}
+                  templateVars={templateVars}
+                  mapping={mapping}
+                  setMapping={setMapping}
+                  missingTemplateVars={missingTemplateVars}
+                />
+              )}
+              {inspect.isError && <div className="mt-4"><ErrorBox msg={(inspect.error as any)?.response?.data?.error || 'Could not read columns'} /></div>}
               {upload.isError && <div className="mt-4"><ErrorBox msg={(upload.error as any)?.response?.data?.error || 'Upload failed'} /></div>}
             </div>
 
             <Card className="self-start">
-              <CardHeader title="Required columns" subtitle="Case-insensitive" />
-              <div className="p-5 text-sm text-slate-700 dark:text-slate-300 space-y-1.5">
-                {['retailer_code', 'retailer_name', 'whatsapp_number', 'invoice_number', 'billing_amount', 'due_date'].map((c) => (
-                  <motion.div
-                    key={c}
-                    initial={{ opacity: 0, x: -4 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.04 }}
-                    className="flex items-center gap-2"
+              <CardHeader title="Template-first upload" subtitle="Any spreadsheet format is okay" />
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Active template
+                  </label>
+                  <select
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-400 dark:border-white/10 dark:bg-slate-950 dark:text-white"
+                    value={templateKey}
+                    onChange={(e) => {
+                      const next = e.target.value
+                      setTemplateKey(next)
+                      const tpl = activeTemplates.find((t) => templateValue(t) === next)
+                      if (inspect.data && tpl) {
+                        setMapping(suggestUploadMapping(inspect.data.headers, extractTemplateVars(tpl.body)))
+                      }
+                    }}
+                    disabled={activeTemplates.length === 0}
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <code className="bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 rounded text-[12px] text-slate-800 dark:text-slate-200">{c}</code>
-                  </motion.div>
-                ))}
-                <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                  Optional: <code>payment_link</code>, <code>language</code> (en/hi/mr).
+                    {activeTemplates.length === 0 ? (
+                      <option value="">No active templates</option>
+                    ) : activeTemplates.map((t) => (
+                      <option key={t.id} value={templateValue(t)}>{t.name} / {t.language_code}</option>
+                    ))}
+                  </select>
                 </div>
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm text-emerald-950 dark:border-emerald-400/20 dark:bg-emerald-500/10 dark:text-emerald-100">
+                  <div className="font-semibold">How it works</div>
+                  <div className="mt-1 leading-6">
+                    Upload any file, then map your columns to the selected template variables. Extra columns are ignored. Missing template variables show a warning before send.
+                  </div>
+                </div>
+                <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                    Phone number is required for delivery.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                    Name is optional; a safe fallback is created if empty.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                    Unmapped template variables will send blank values.
+                  </div>
+                </div>
+                {!activeTemplate && (
+                  <Link
+                    to="/admin/templates"
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+                  >
+                    Create or activate template <ExternalLink className="h-3.5 w-3.5" />
+                  </Link>
+                )}
+                <TemplateMessagePreview
+                  template={activeTemplate}
+                  title="Selected template"
+                  subtitle="Before mapping, variables stay visible."
+                />
               </div>
             </Card>
           </motion.div>
@@ -474,6 +589,349 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: 'gr
 
 function Th({ children }: { children?: React.ReactNode }) { return <th className="text-left px-3 py-2 font-medium">{children}</th> }
 function Td({ children, className = '' }: { children?: React.ReactNode; className?: string }) { return <td className={`px-3 py-2 ${className}`}>{children}</td> }
+
+function SmartMappingPanel({
+  inspect,
+  template,
+  templateVars,
+  mapping,
+  setMapping,
+  missingTemplateVars,
+}: {
+  inspect: UploadInspectResp
+  template: Template
+  templateVars: string[]
+  mapping: UploadMappingState
+  setMapping: React.Dispatch<React.SetStateAction<UploadMappingState>>
+  missingTemplateVars: string[]
+}) {
+  const sample = inspect.sample_rows[0] || {}
+  const ignoredCount = Math.max(0, inspect.headers.length - mappedColumnCount(mapping))
+
+  function update<K extends keyof UploadMappingState>(key: K, value: UploadMappingState[K]) {
+    setMapping((prev) => ({ ...prev, [key]: value }))
+  }
+  function updateVar(token: string, column: string) {
+    setMapping((prev) => ({
+      ...prev,
+      template_vars: { ...prev.template_vars, [token]: column },
+    }))
+  }
+
+  return (
+    <Card hover={false} className="mt-6 overflow-hidden">
+      <CardHeader
+        title="Map columns to template"
+        subtitle={`${inspect.total_rows} rows found in ${inspect.file_name}`}
+        right={
+          <button
+            type="button"
+            onClick={() => setMapping(suggestUploadMapping(inspect.headers, templateVars))}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
+          >
+            <Sparkles className="h-3.5 w-3.5" /> Auto map
+          </button>
+        }
+      />
+      <div className="p-5 space-y-5">
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <MappingSelect label="Phone number" required value={mapping.phone} headers={inspect.headers} sample={sample} onChange={(v) => update('phone', v)} />
+            <MappingSelect label="Customer / retailer name" value={mapping.name} headers={inspect.headers} sample={sample} onChange={(v) => update('name', v)} />
+          </div>
+          <TemplateMessagePreview
+            template={template}
+            sample={sample}
+            mapping={mapping}
+            title="Live sample message"
+            subtitle="Updates from the first row as you map columns."
+          />
+        </div>
+
+        {templateVars.length > 0 ? (
+          <div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900 dark:text-white">Template variables</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {template.name} needs {templateVars.length} variable{templateVars.length === 1 ? '' : 's'}.
+                </div>
+              </div>
+              {ignoredCount > 0 && (
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                  {ignoredCount} extra column{ignoredCount === 1 ? '' : 's'} ignored
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {templateVars.map((token) => (
+                <MappingSelect
+                  key={token}
+                  label={`{{${token}}}`}
+                  value={mapping.template_vars[token] || ''}
+                  headers={inspect.headers}
+                  sample={sample}
+                  onChange={(v) => updateVar(token, v)}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+            This template has no variables. Only the phone column is required.
+          </div>
+        )}
+
+        {missingTemplateVars.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="font-semibold">Some template variables are not mapped</div>
+                <div className="mt-1 leading-6">
+                  {missingTemplateVars.map((v) => `{{${v}}}`).join(', ')} will be blank in the final message unless you map them.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <details className="rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-slate-950/40">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-white">Sample row preview</summary>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+            {inspect.headers.slice(0, 12).map((h) => (
+              <div key={h} className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-white/5">
+                <div className="font-medium text-slate-700 dark:text-slate-200">{h}</div>
+                <div className="mt-0.5 truncate text-slate-500 dark:text-slate-400">{sample[h] || '-'}</div>
+              </div>
+            ))}
+          </div>
+        </details>
+      </div>
+    </Card>
+  )
+}
+
+function TemplateMessagePreview({
+  template,
+  sample,
+  mapping,
+  title,
+  subtitle,
+}: {
+  template: Template | null
+  sample?: Record<string, string>
+  mapping?: UploadMappingState
+  title: string
+  subtitle: string
+}) {
+  const body = template?.body || ''
+  const mapped = mapping && sample ? previewTemplateParts(body, mapping, sample) : previewTemplateParts(body)
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-900 dark:text-white">{title}</div>
+          <div className="mt-0.5 text-[11px] leading-5 text-slate-500 dark:text-slate-400">{subtitle}</div>
+        </div>
+        {template && (
+          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+            {template.language_code}
+          </span>
+        )}
+      </div>
+
+      <div className="overflow-hidden rounded-[1.35rem] border border-slate-200 bg-[#e5ddd5] p-3 shadow-inner dark:border-white/10">
+        <div className="mb-2 flex items-center gap-2 rounded-t-xl bg-[#075e54] px-3 py-2 text-white">
+          <div className="grid h-7 w-7 place-items-center rounded-full bg-white/15 text-[11px] font-bold">
+            {template?.name?.slice(0, 1)?.toUpperCase() || 'T'}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold">{template?.name || 'Select template'}</div>
+            <div className="text-[10px] text-white/75">WhatsApp preview</div>
+          </div>
+        </div>
+        <div className="rounded-2xl rounded-tr-md bg-[#dcf8c6] px-3 py-2 text-[12.5px] leading-relaxed text-slate-900 shadow-sm">
+          {body ? (
+            <div className="max-h-44 overflow-y-auto whitespace-pre-wrap break-words">
+              {mapped}
+            </div>
+          ) : (
+            <div className="text-slate-600">Choose an active template to preview the message.</div>
+          )}
+        </div>
+      </div>
+
+      {mapping && (
+        <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+          Green values are filled from the sample row. Amber placeholders still need mapping.
+        </div>
+      )}
+    </div>
+  )
+}
+
+function previewTemplateParts(body: string, mapping?: UploadMappingState, sample?: Record<string, string>) {
+  if (!body) return null
+  const parts: React.ReactNode[] = []
+  const re = /\{\{\s*([^{}]+?)\s*\}\}/g
+  let last = 0
+  let match: RegExpExecArray | null
+  while ((match = re.exec(body))) {
+    if (match.index > last) parts.push(body.slice(last, match.index))
+    const token = match[1].trim()
+    const column = mapping?.template_vars[token] || ''
+    const value = column && sample ? sample[column] : ''
+    parts.push(
+      value ? (
+        <span key={`${token}-${match.index}`} className="rounded-md bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-900">
+          {value}
+        </span>
+      ) : (
+        <span key={`${token}-${match.index}`} className="rounded-md bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900">
+          {`{{${token}}}`}
+        </span>
+      ),
+    )
+    last = re.lastIndex
+  }
+  if (last < body.length) parts.push(body.slice(last))
+  return parts
+}
+
+function MappingSelect({
+  label,
+  value,
+  headers,
+  sample,
+  required,
+  onChange,
+}: {
+  label: string
+  value: string
+  headers: string[]
+  sample: Record<string, string>
+  required?: boolean
+  onChange: (v: string) => void
+}) {
+  return (
+    <label className="block">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {label}{required ? ' *' : ''}
+        </span>
+        {value && (
+          <span className="max-w-[160px] truncate text-[11px] text-slate-400 dark:text-slate-500">
+            {sample[value] || 'blank in sample'}
+          </span>
+        )}
+      </div>
+      <select
+        className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-400 dark:bg-slate-950 dark:text-white ${
+          required && !value ? 'border-rose-300 dark:border-rose-400/50' : 'border-slate-200 dark:border-white/10'
+        }`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">Do not map</option>
+        {headers.map((h) => (
+          <option key={h} value={h}>{h}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function emptyUploadMapping(): UploadMappingState {
+  return {
+    phone: '',
+    name: '',
+    retailer_code: '',
+    invoice_number: '',
+    billing_amount: '',
+    due_date: '',
+    payment_link: '',
+    language: '',
+    template_vars: {},
+  }
+}
+
+function suggestUploadMapping(headers: string[], vars: string[]): UploadMappingState {
+  const mapping = emptyUploadMapping()
+  mapping.phone = pickHeader(headers, ['whatsapp', 'mobile', 'phone', 'contact', 'number'])
+  mapping.name = pickHeader(headers, ['retailer', 'customer', 'client', 'buyer', 'shop', 'store', 'name'])
+  mapping.retailer_code = pickHeader(headers, ['retailer_code', 'code', 'customer_id', 'id'])
+  mapping.invoice_number = pickHeader(headers, ['invoice', 'bill', 'order'])
+  mapping.billing_amount = pickHeader(headers, ['amount', 'total', 'pending', 'balance', 'price'])
+  mapping.due_date = pickHeader(headers, ['due', 'date', 'payment_date'])
+  mapping.payment_link = pickHeader(headers, ['payment_link', 'link', 'url'])
+  mapping.language = pickHeader(headers, ['language', 'lang'])
+  for (const token of vars) {
+    mapping.template_vars[token] = suggestForToken(headers, token, mapping)
+  }
+  return mapping
+}
+
+function suggestForToken(headers: string[], token: string, mapping: UploadMappingState): string {
+  const key = token.toLowerCase()
+  if (/^\d+$/.test(key)) {
+    const defaults = [mapping.name, '', mapping.invoice_number, mapping.billing_amount, mapping.due_date, mapping.payment_link]
+    return defaults[Number(key) - 1] || ''
+  }
+  if (/(phone|mobile|whatsapp|number)/.test(key)) return mapping.phone
+  if (/(name|customer|retailer|shop|client)/.test(key)) return mapping.name
+  if (/(invoice|bill|order)/.test(key)) return mapping.invoice_number
+  if (/(amount|total|price|balance|pending)/.test(key)) return mapping.billing_amount
+  if (/(due|date|time)/.test(key)) return mapping.due_date
+  if (/(link|url|pay)/.test(key)) return mapping.payment_link
+  return pickHeader(headers, [key])
+}
+
+function pickHeader(headers: string[], hints: string[]): string {
+  const normalized = hints.map(normalizeHeader)
+  return headers.find((h) => {
+    const n = normalizeHeader(h)
+    return normalized.some((hint) => n.includes(hint) || hint.includes(n))
+  }) || ''
+}
+
+function normalizeHeader(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function extractTemplateVars(body: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const re = /\{\{\s*([^{}]+?)\s*\}\}/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(body))) {
+    const token = match[1].trim()
+    if (!token || seen.has(token)) continue
+    seen.add(token)
+    out.push(token)
+  }
+  return out
+}
+
+function mappedColumnCount(mapping: UploadMappingState): number {
+  const values = [
+    mapping.phone,
+    mapping.name,
+    mapping.retailer_code,
+    mapping.invoice_number,
+    mapping.billing_amount,
+    mapping.due_date,
+    mapping.payment_link,
+    mapping.language,
+    ...Object.values(mapping.template_vars),
+  ].filter(Boolean)
+  return new Set(values).size
+}
+
+function templateValue(t: Template) {
+  return `${t.name}|${t.language_code}`
+}
 
 /* ----------------------------------------------------------------------- */
 /* AI follow-up — per-batch toggle + activity panel                         */

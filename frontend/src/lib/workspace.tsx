@@ -46,6 +46,13 @@ export const WORKSPACE_ORDER: WorkspaceId[] = ['bulk', 'ai']
 
 const STORAGE_KEY = 'whatsyitc.activeWorkspace'
 
+export function explicitWorkspaceFromPath(pathname: string): WorkspaceId | null {
+  const rest = pathname.replace(/^\/admin\/?/, '')
+  if (rest === 'messages/bulk' || rest.startsWith('messages/bulk/')) return 'bulk'
+  if (rest === 'ai' || rest.startsWith('ai/')) return 'ai'
+  return null
+}
+
 /** Resolve which workspace a given pathname belongs to.
  *  Falls back to `bulk` for /admin root or anything unrecognised. */
 export function workspaceFromPath(pathname: string): WorkspaceId {
@@ -101,6 +108,8 @@ export function WorkspaceProvider({
   const [active, setActiveState] = useState<WorkspaceId>(() => {
     if (initial) return initial
     if (typeof window === 'undefined') return 'bulk'
+    const fromPath = explicitWorkspaceFromPath(window.location.pathname)
+    if (fromPath) return fromPath
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY)
       if (raw === 'bulk' || raw === 'ai') return raw

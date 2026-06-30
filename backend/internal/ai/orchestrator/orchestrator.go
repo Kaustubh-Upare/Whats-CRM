@@ -181,6 +181,10 @@ func (o *Orchestrator) HandleInbound(ctx context.Context, adminID int64, phone, 
 		slog.Error("orchestrator: load agent config", "err", err)
 		return
 	}
+	userContext, err := o.loadAIUserPromptContext(ctx, adminID, phone)
+	if err != nil {
+		slog.Warn("orchestrator: load AI user profile", "phone", phone, "err", err)
+	}
 
 	// 7. Retrieve KB chunks.
 	var chunks []retrieval.RetrievedChunk
@@ -192,8 +196,12 @@ func (o *Orchestrator) HandleInbound(ctx context.Context, adminID int64, phone, 
 	}
 
 	// 8. Build messages + system prompt + tool definitions.
+	var promptContexts []aiUserPromptContext
+	if userContext != nil {
+		promptContexts = append(promptContexts, *userContext)
+	}
 	system := withInlineHumanReviewInstructions(
-		BuildSystemPrompt(cfg, history, chunks, convID, phone),
+		BuildSystemPrompt(cfg, history, chunks, convID, phone, promptContexts...),
 		"Live inbound WhatsApp reply. If the AI can fully answer safely, set requires_review=false. If a human should inspect this phone, set requires_review=true with the reason and next action.",
 	)
 	toolDefs := o.registry.Definitions(adminID)
@@ -282,8 +290,39 @@ func (o *Orchestrator) HandleInbound(ctx context.Context, adminID int64, phone, 
 		break
 	}
 
-	if finalText == "" {
-		finalText = "(no response)"
+	if strings.TrimSpace(finalText) == "" {
+		recoveredText, recoveredReview, recoveredModel, recoveredProvider, recoveredUsage, recoveredLatency := o.recoverEmptyInboundReply(
+			ctx, adminID, system, history, chunks, text, routing,
+		)
+		if strings.TrimSpace(recoveredText) != "" {
+			finalText = recoveredText
+			finalReview = recoveredReview
+			finalModel = recoveredModel
+			finalProvider = recoveredProvider
+			finalUsage = recoveredUsage
+			finalLatencyMs = recoveredLatency
+		} else {
+			finalText = fallbackInboundReply(text, chunks)
+			finalModel = firstNonEmpty(finalModel, routing.Model)
+			finalProvider = firstNonEmpty(finalProvider, routing.Provider)
+			slog.Warn("orchestrator: empty customer-visible reply, using safe fallback",
+				"conv", convID, "phone", phone, "chunks", len(chunks))
+		}
+		if len(finalChunks) == 0 {
+			for _, c := range chunks {
+				finalChunks = append(finalChunks, c.ID)
+			}
+		}
+	}
+	if finalReview == nil {
+		finalReview = fallbackInlineHumanReviewSignal(
+			text,
+			finalText,
+			classifyIntent(text),
+			len(chunks) > 0 && hasKeywordHit(chunks),
+			topConfidence,
+			"inbound_reply",
+		)
 	}
 
 	o.saveInlineHumanReviewSignal(ctx, adminID, phone, finalReview, finalText, finalModel, firstNonEmpty(finalProvider, routing.Provider), "inbound_reply")
@@ -539,12 +578,7 @@ func (o *Orchestrator) ResolveAgentForCall(ctx context.Context, adminID int64, b
 			`, *agentID, adminID).Scan(&agentEnabled, &row.Name, &row.PersonaMd, &row.Tone, &row.SystemPrompt, &row.FAQConfidenceThresh)
 			if scanErr == nil {
 				if !agentEnabled {
-					_, _ = o.pool.Exec(ctx, `
-						UPDATE bc_ai_agents
-						SET enabled = TRUE
-						WHERE id = $1 AND admin_user_id = $2
-					`, *agentID, adminID)
-					slog.Info("orchestrator: enabled disabled batch agent", "batch_id", *batchID, "agent_id", *agentID)
+					return agentConfigRow{}, "none", nil
 				}
 				row.ID = *agentID
 				return row, "batch_override", nil
@@ -555,9 +589,9 @@ func (o *Orchestrator) ResolveAgentForCall(ctx context.Context, adminID int64, b
 			// Assigned agent was deleted — fall through to default.
 		}
 	}
-	// No batch override: use an enabled default. For batch-owned inbound
-	// replies, wake the saved default if every agent is currently disabled;
-	// the batch AI toggle is the workflow stop switch.
+	// No batch override: use an enabled default. Credentials alone are not
+	// consent for AI replies; an operator must explicitly create/enable an
+	// agent before we spend LLM tokens or answer arbitrary inbound messages.
 	var row agentConfigRow
 	err := o.pool.QueryRow(ctx, `
 		SELECT id, name, persona_md, tone, system_prompt, faq_confidence_threshold
@@ -567,29 +601,6 @@ func (o *Orchestrator) ResolveAgentForCall(ctx context.Context, adminID int64, b
 		LIMIT 1
 	`, adminID).Scan(&row.ID, &row.Name, &row.PersonaMd, &row.Tone, &row.SystemPrompt, &row.FAQConfidenceThresh)
 	if err == pgx.ErrNoRows {
-		if batchID != nil {
-			var defaultEnabled bool
-			err = o.pool.QueryRow(ctx, `
-				SELECT id, enabled, name, persona_md, tone, system_prompt, faq_confidence_threshold
-				FROM bc_ai_agents
-				WHERE admin_user_id = $1 AND is_default = TRUE
-				LIMIT 1
-			`, adminID).Scan(&row.ID, &defaultEnabled, &row.Name, &row.PersonaMd, &row.Tone, &row.SystemPrompt, &row.FAQConfidenceThresh)
-			if err == nil {
-				if !defaultEnabled {
-					_, _ = o.pool.Exec(ctx, `
-						UPDATE bc_ai_agents
-						SET enabled = TRUE
-						WHERE id = $1 AND admin_user_id = $2
-					`, row.ID, adminID)
-					slog.Info("orchestrator: enabled disabled default agent for batch", "batch_id", *batchID, "agent_id", row.ID)
-				}
-				return row, "global_default", nil
-			}
-			if err != pgx.ErrNoRows {
-				return agentConfigRow{}, "", err
-			}
-		}
 		return agentConfigRow{}, "none", nil
 	}
 	if err != nil {
@@ -678,12 +689,15 @@ func (o *Orchestrator) persistAssistantToolOnly(ctx context.Context, adminID, co
 		"usage":      usage,
 		"latency_ms": latencyMs,
 	}
+	if strings.TrimSpace(content) != "" {
+		meta["raw_model_text"] = content
+	}
 	raw, _ := json.Marshal(meta)
 	_, _ = o.pool.Exec(ctx, `
 		INSERT INTO bc_ai_conversation_messages
 			(admin_user_id, conversation_key, conversation_id, phone, role, content, model_used, tokens_in, tokens_out, latency_ms, tool_calls)
 		VALUES ($1, $2, $3, $4, 'assistant', $5, $6, $7, $8, $9, $10)
-	`, adminID, convKey, convID, phone, content, model, usage.InputTokens, usage.OutputTokens, latencyMs, raw)
+	`, adminID, convKey, convID, phone, "", model, usage.InputTokens, usage.OutputTokens, latencyMs, raw)
 }
 
 func (o *Orchestrator) persistAssistant(ctx context.Context, adminID, convID int64, convKey, phone, content, model string, usage llm.Usage, latencyMs int, chunkIDs []int64) (int64, error) {
@@ -853,6 +867,73 @@ func (o *Orchestrator) send(ctx context.Context, adminID int64, phone, text stri
 		return nil
 	}
 	return o.sender.SendText(ctx, phone, text)
+}
+
+func (o *Orchestrator) recoverEmptyInboundReply(
+	ctx context.Context,
+	adminID int64,
+	system string,
+	history []llm.Message,
+	chunks []retrieval.RetrievedChunk,
+	customerText string,
+	routing llm.RoutingDecision,
+) (string, *models.AIHumanReviewSignal, string, string, llm.Usage, int) {
+	if o.llm == nil || !o.llm.Enabled() {
+		return "", nil, "", "", llm.Usage{}, 0
+	}
+	recoveryMessages := historyForLLM(history, chunks)
+	recoveryMessages = append(recoveryMessages, llm.Message{
+		Role: llm.RoleUser,
+		Content: "The previous model turn produced no customer-visible text. Reply now to this WhatsApp customer message:\n\n" +
+			customerText + "\n\nReturn a short helpful customer reply. Do not call tools. Do not return internal markers only.",
+	})
+	started := time.Now()
+	resp, err := o.llm.Chat(ctx, llm.ChatRequest{
+		Model:       routing.Model,
+		System:      system,
+		Messages:    recoveryMessages,
+		Temperature: 0.25,
+		MaxTokens:   420,
+		BusinessID:  adminID,
+		Intent:      classifyIntent(customerText),
+	})
+	latencyMs := int(time.Since(started) / time.Millisecond)
+	if err != nil {
+		slog.Warn("orchestrator: recover empty reply failed", "err", err)
+		return "", nil, routing.Model, routing.Provider, llm.Usage{}, latencyMs
+	}
+	reply, review := parseInlineHumanReviewOutput(resp.Text)
+	reply = strings.TrimSpace(reply)
+	if strings.EqualFold(reply, "(no response)") {
+		reply = ""
+	}
+	return reply, review, firstNonEmpty(resp.Model, routing.Model), firstNonEmpty(resp.Provider, routing.Provider), resp.Usage, latencyMs
+}
+
+func fallbackInboundReply(customerText string, chunks []retrieval.RetrievedChunk) string {
+	if len(chunks) > 0 {
+		snippet := compactFallbackSnippet(chunks[0].Content, 240)
+		if snippet != "" {
+			return "Sure, here is what I found in our catalog: " + snippet + " Which item would you like details or pricing for?"
+		}
+		return "Sure, I found matching catalog information. Which product would you like details or pricing for?"
+	}
+	if strings.TrimSpace(customerText) != "" {
+		return "Sorry, I could not pull the right details in this moment. Let me check and get back to you."
+	}
+	return "Sorry, I could not generate the right reply in this moment. Let me check and get back to you."
+}
+
+func compactFallbackSnippet(value string, maxRunes int) string {
+	clean := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if clean == "" {
+		return ""
+	}
+	runes := []rune(clean)
+	if maxRunes <= 0 || len(runes) <= maxRunes {
+		return clean
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
 }
 
 // topSim returns the strongest retrieval confidence. In Bedrock-only

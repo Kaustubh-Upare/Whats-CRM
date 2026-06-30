@@ -179,3 +179,29 @@ func TestTokenizeQueryExpandsProductQuestions(t *testing.T) {
 		}
 	}
 }
+
+func TestIsBroadCatalogQuery(t *testing.T) {
+	yes := []string{
+		"Can you list products?",
+		"What do you sell",
+		"Show me the product catalogue",
+		"What kinds of sweets do you have?",
+		"menu please",
+	}
+	for _, q := range yes {
+		if !isBroadCatalogQuery(q) {
+			t.Fatalf("isBroadCatalogQuery(%q) = false, want true", q)
+		}
+	}
+
+	no := []string{
+		"What is the price of kaju katli?",
+		"Can we meet tomorrow?",
+		"I want to talk to a human",
+	}
+	for _, q := range no {
+		if isBroadCatalogQuery(q) {
+			t.Fatalf("isBroadCatalogQuery(%q) = true, want false", q)
+		}
+	}
+}

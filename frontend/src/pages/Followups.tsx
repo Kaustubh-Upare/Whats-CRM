@@ -4,16 +4,16 @@ import { Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import {
-  Search, RefreshCw, ExternalLink, Bot, Layers, MessageSquare,
+  Search, RefreshCw, Bot, Layers,
   CheckCircle2, X, FileText, Sparkles, AlertTriangle,
   ArrowRight, Clock3, Users,
 } from 'lucide-react'
 import {
-  Card, CardHeader, Empty, ErrorBox, PageHeader, PrimaryButton, SecondaryButton, Spinner,
+  Card, Empty, ErrorBox, PageHeader, PrimaryButton, SecondaryButton, Spinner,
 } from '@/components/ui'
 import { batchDisplayName, fmtRelative } from '@/lib/format'
 import {
-  AIFollowupLastMessage, AIFollowupStatusBadge, AIFollowupStatusCounts,
+  AIFollowupLastMessage, AIFollowupStatusCounts,
 } from '@/components/AIFollowupParts'
 import DuplicatePhonesWarningModal from '@/components/DuplicatePhonesWarningModal'
 import {
@@ -128,11 +128,6 @@ export default function Followups() {
     () => buildBatchSummaries(batchesQ.data || [], items),
     [batchesQ.data, items],
   )
-  const batchLookup = useMemo(() => {
-    const map = new Map<number, BatchCommandSummary>()
-    for (const s of summaries) map.set(s.id, s)
-    return map
-  }, [summaries])
 
   const filteredSummaries = useMemo(() => {
     const q = debouncedSearch.toLowerCase()
@@ -277,10 +272,6 @@ export default function Followups() {
     startMut.mutate({ batchId, cfg, opts })
   }
 
-  function batchLabelFor(batchId: number) {
-    return batchLookup.get(batchId)?.fileName || `Batch #${batchId}`
-  }
-
   return (
     <>
       <PageHeader
@@ -368,136 +359,6 @@ export default function Followups() {
         filterActive={filterActive}
         onEnable={openEnableFlow}
       />
-
-      <Card hover={false}>
-        <CardHeader
-          title="Recipient activity feed"
-          subtitle={
-            filterActive
-              ? 'Filtered. Reset to see everything.'
-              : 'Live recipient-level activity across all AI follow-up batches. Polls every 5s.'
-          }
-        />
-        {list.isLoading && <div className="p-6"><Spinner /></div>}
-        {list.isError && (
-          <div className="p-5 pt-0">
-            <ErrorBox msg={(list.error as any)?.response?.data?.error || 'Failed to load follow-ups'} />
-          </div>
-        )}
-        {list.isSuccess && items.length === 0 && (
-          <div className="p-6">
-            <Empty>
-              {filterActive
-                ? 'No recipients match these filters.'
-                : (
-                  <span className="inline-flex flex-col items-center gap-2 text-center">
-                    <Bot className="w-8 h-8 text-slate-300 dark:text-slate-600" />
-                    <span>No AI follow-ups yet.</span>
-                    <span className="text-slate-500 dark:text-slate-400">
-                      Toggle AI follow-up on a batch from the{' '}
-                      <Link to="/admin/messages/bulk/upload" className="text-emerald-600 dark:text-emerald-400 hover:underline">Upload</Link>
-                      {' '}page.
-                    </span>
-                  </span>
-                )
-              }
-            </Empty>
-          </div>
-        )}
-        {list.isSuccess && items.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 dark:bg-white/5 text-slate-600 dark:text-slate-300">
-                <tr>
-                  <Th>Retailer</Th>
-                  <Th>WhatsApp</Th>
-                  <Th>Batch</Th>
-                  <Th>Status</Th>
-                  <Th>AI details</Th>
-                  <Th>Last message</Th>
-                  <Th>Last event</Th>
-                  <Th></Th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((r, i) => (
-                  <motion.tr
-                    key={r.id}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: Math.min(i, 10) * 0.02, duration: 0.2 }}
-                    whileHover={{ backgroundColor: 'rgba(148,163,184,0.08)' }}
-                    className="border-t border-slate-100 dark:border-white/10"
-                  >
-                    <Td>{r.retailer_name || '—'}</Td>
-                    <Td className="font-mono text-xs">{r.whatsapp_number}</Td>
-                    <Td>
-                      <div className="flex items-center gap-2">
-                        <Link
-                          to={`/admin/ai/followups/batches/${r.batch_id}`}
-                          className="max-w-[220px] truncate text-emerald-700 dark:text-emerald-300 hover:underline inline-flex items-center gap-1"
-                          title={`${batchLabelFor(r.batch_id)} (Batch #${r.batch_id})`}
-                        >
-                          {batchLabelFor(r.batch_id)}
-                        </Link>
-                        <Link
-                          to={`/admin/ai/followups/batches/${r.batch_id}`}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md
-                                     border border-slate-200 dark:border-white/10
-                                     text-slate-600 dark:text-slate-300
-                                     hover:bg-slate-50 dark:hover:bg-white/5
-                                     transition-colors"
-                          title="Open the batch AI control center"
-                        >
-                          <Bot className="w-3 h-3" /> Control
-                        </Link>
-                        {/* Per-row "Approve batch" trigger. The server
-                            returns 409 with a clear message if the
-                            batch is already approved/sending/etc., so
-                            the button is safe to show on every row. */}
-                        <button
-                          type="button"
-                          onClick={() => setApproveFor({ id: r.batch_id, label: batchLabelFor(r.batch_id) })}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md
-                                     border border-emerald-200/80 dark:border-emerald-400/30
-                                     text-emerald-700 dark:text-emerald-300
-                                     hover:bg-emerald-50 dark:hover:bg-emerald-500/10
-                                     transition-colors"
-                          title="Approve this batch — picks an active template, then queues the messages and unlocks AI follow-up"
-                        >
-                          <CheckCircle2 className="w-3 h-3" /> Approve batch
-                        </button>
-                      </div>
-                    </Td>
-                    <Td><AIFollowupStatusBadge status={r.ai_status} /></Td>
-                    <Td>
-                      <Link
-                        to={`/admin/ai/followups/recipients/${r.id}`}
-                        className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300 hover:underline"
-                      >
-                        <Bot className="w-3 h-3" /> AI timeline <ExternalLink className="w-3 h-3" />
-                      </Link>
-                      <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
-                        Agent, retailer, schedule
-                      </div>
-                    </Td>
-                    <Td><AIFollowupLastMessage r={r} /></Td>
-                    <Td><LastEventCell r={r} /></Td>
-                    <Td>
-                      <Link
-                        to={`/admin/ai/conversations?phone=${encodeURIComponent(r.whatsapp_number)}`}
-                        className="inline-flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-300 hover:underline"
-                      >
-                        <MessageSquare className="w-3 h-3" /> Open chat <ExternalLink className="w-3 h-3" />
-                      </Link>
-                    </Td>
-                  </motion.tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
 
       {approveFor !== null && (
         <ApproveBatchModal

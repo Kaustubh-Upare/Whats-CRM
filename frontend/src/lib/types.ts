@@ -81,6 +81,63 @@ export interface Retailer {
   updated_at: string
 }
 
+export interface AIUser {
+  id: number
+  retailer_id: number
+  retailer_code: string
+  name: string
+  phone: string
+  city?: string | null
+  state?: string | null
+  is_opted_out: boolean
+  source: 'manual' | 'import' | 'retailer' | string
+  extra_fields: Record<string, string>
+  last_imported_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AIUsersList {
+  items: AIUser[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AIUsersInspectResult {
+  headers: string[]
+  sample_rows: Record<string, string>[]
+  total_rows: number
+  file_name: string
+  suggested: {
+    name: string
+    phone: string
+    extra_columns: string[]
+  }
+}
+
+export interface AIUsersImportResult {
+  ok: true
+  file_name: string
+  total: number
+  imported: number
+  skipped: number
+  errors: Array<{ row: number; field: string; message: string }>
+  preview: AIUser[]
+}
+
+export interface AIUserFollowupResult {
+  user: AIUser
+  batch_id: number
+  recipient_id: number
+  enrollment_ids: number[]
+  sequence_ids: number[]
+  count: number
+  already_active: boolean
+  redirect_url: string
+  message: string
+}
+
 export interface ValidationErrorItem {
   field: string
   code: string
@@ -868,6 +925,84 @@ export interface AIHumanReviewList {
   items: AIHumanReviewItem[]
   total: number
   stats: AIHumanReviewStats
+}
+
+export type AIWorkflowStateKey =
+  | 'new'
+  | 'ai_talking'
+  | 'buyer_replied'
+  | 'needs_human'
+  | 'followup_scheduled'
+  | 'paused'
+  | 'closed'
+  | string
+
+export interface AIDecisionLog {
+  id: number
+  workflow_state_id?: number | null
+  batch_id?: number | null
+  batch_ai_recipient_id?: number | null
+  conversation_id?: number | null
+  phone: string
+  decision_type: string
+  title: string
+  reason: string
+  knowledge_refs: string[]
+  next_action: string
+  quality: Record<string, any>
+  model: string
+  provider: string
+  source: string
+  created_at: string
+}
+
+export interface AIWorkflowState {
+  id: number
+  batch_id?: number | null
+  batch_ai_recipient_id: number
+  conversation_id?: number | null
+  retailer_id?: number | null
+  phone: string
+  retailer_name: string
+  batch_name: string
+  state: AIWorkflowStateKey
+  state_label: string
+  state_reason: string
+  next_action: string
+  next_message_preview: string
+  confidence_score: number
+  risk_level: 'critical' | 'high' | 'medium' | 'low' | string
+  buyer_intent: string
+  knowledge_matched: boolean
+  knowledge_refs: string[]
+  quality: Record<string, any>
+  source: string
+  last_message_at?: string | null
+  last_event_at?: string | null
+  created_at: string
+  updated_at: string
+  recent_decisions?: AIDecisionLog[]
+}
+
+export interface AIWorkflowStats {
+  total: number
+  new: number
+  ai_talking: number
+  buyer_replied: number
+  needs_human: number
+  followup_scheduled: number
+  paused: number
+  closed: number
+  action_required: number
+  high_risk: number
+  avg_confidence_score: number
+  by_state: Record<string, number>
+}
+
+export interface AIWorkflowList {
+  items: AIWorkflowState[]
+  total: number
+  stats: AIWorkflowStats
 }
 
 // StageAutomation is the shape we send to PUT

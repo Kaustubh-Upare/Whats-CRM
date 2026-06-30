@@ -11,14 +11,15 @@ import { ErrorBox, PageHeader, Spinner } from '@/components/ui'
 import { FollowUpMenuItem } from '@/components/FollowUpMenuItem'
 import { listLeads } from '@/lib/crm'
 import { fmtRelative } from '@/lib/format'
+import { getConversationMessages, listConversations } from '@/lib/ai'
+import type { AIConversation, AIConversationMessage } from '@/lib/types'
 
-type Conversation = {
+type Conversation = AIConversation & {
   retailer_id?: number | null
   phone: string
-  retailer_name: string
-  last_message_at: string
-  last_preview: string
-  last_status: string
+  retailer_name?: string
+  last_preview?: string
+  last_status?: string
   last_direction: 'outbound' | 'inbound' | string
   message_count: number
   has_failed: boolean
@@ -36,11 +37,77 @@ type ThreadMessage = {
   provider_msg_id?: string | null
   invoice_number?: string | null
   amount?: number | null
-  message_job_id: number
+  message_job_id?: number
 }
 
 function convKey(c: Conversation) {
-  return c.retailer_id != null ? `r:${c.retailer_id}` : `p:${c.phone}`
+  return `c:${c.id}`
+}
+
+function toBulkChatConversation(c: AIConversation): Conversation {
+  const raw = c as any
+  const lastDirection = raw.last_message_direction === 'in' || raw.last_message_role === 'user'
+    ? 'inbound'
+    : 'outbound'
+  const name = c.lead_name || c.summary || c.phone || 'WhatsApp user'
+  return {
+    ...c,
+    retailer_name: name,
+    last_preview: c.last_message_preview || '',
+    last_status: c.status,
+    last_direction: lastDirection,
+    message_count: Number(c.ai_handled_count || 0) + Number(c.human_handled_count || 0),
+    has_failed: false,
+  }
+}
+
+function displayName(c: Conversation) {
+  return c.retailer_name || c.lead_name || c.phone || 'WhatsApp user'
+}
+
+const INTERNAL_TEXT_MARKERS = [
+  '<｜DSML｜function_calls',
+  '<|DSML|function_calls',
+  '<｜function_calls',
+  '<function_calls',
+  '<｜tool_calls',
+  '<tool_calls',
+  '<|tool_call',
+  '<tool_call',
+]
+
+function cleanVisibleConversationText(value?: string | null): string {
+  let clean = (value || '').trim()
+  if (!clean) return ''
+  for (const marker of INTERNAL_TEXT_MARKERS) {
+    const idx = clean.indexOf(marker)
+    if (idx >= 0) clean = clean.slice(0, idx).trim()
+  }
+  return clean
+    .split('<customer_reply>').join('')
+    .split('</customer_reply>').join('')
+    .split('<human_review_json>').join('')
+    .split('</human_review_json>').join('')
+    .trim()
+}
+
+function isCustomerVisibleAIMessage(m: AIConversationMessage): boolean {
+  if (m.role === 'tool' || m.role === 'system') return false
+  if ((m.role === 'assistant' || m.role === 'human') && !cleanVisibleConversationText(m.content)) return false
+  return true
+}
+
+function toBulkThreadMessage(m: AIConversationMessage): ThreadMessage {
+  const outbound = m.role === 'assistant' || m.role === 'human'
+  return {
+    id: m.id,
+    direction: outbound ? 'outbound' : 'inbound',
+    body: cleanVisibleConversationText(m.content),
+    status: m.send_status || (outbound ? 'sent' : 'received'),
+    occurred_at: m.sent_at || m.created_at,
+    last_error: m.send_error || null,
+    provider_msg_id: m.provider_msg_id || null,
+  }
 }
 
 export default function Chats() {
@@ -55,12 +122,19 @@ export default function Chats() {
   const qc = useQueryClient()
 
   const convs = useQuery({
-    queryKey: ['conversations', q],
-    queryFn: async () =>
-      (await api.get(`/api/conversations?q=${encodeURIComponent(q)}&limit=200`)).data as {
-        items: Conversation[]
-        total: number
-      },
+    queryKey: ['conversations', 'unified', q],
+    queryFn: async () => {
+      const data = await listConversations({ limit: 200 })
+      const mapped = (data.items || []).map(toBulkChatConversation)
+      const needle = q.trim().toLowerCase()
+      const items = needle
+        ? mapped.filter((c) =>
+          c.phone.toLowerCase().includes(needle)
+          || displayName(c).toLowerCase().includes(needle)
+          || (c.last_preview || '').toLowerCase().includes(needle))
+        : mapped
+      return { items, total: items.length }
+    },
     refetchInterval: 5000,
   })
 
@@ -92,14 +166,11 @@ export default function Chats() {
   // Thread query — uses retailer_id when available, otherwise falls back to
   // a dedicated endpoint for unlinked-phone messages (added below).
   const thread = useQuery({
-    queryKey: ['conversation', active?.retailer_id, active?.phone],
+    queryKey: ['conversation', 'unified', active?.id],
     queryFn: async () => {
       if (!active) return { items: [] as ThreadMessage[] }
-      if (active.retailer_id != null) {
-        return (await api.get(`/api/conversations/${active.retailer_id}/messages?limit=500`)).data as { items: ThreadMessage[] }
-      }
-      // Unlinked phone fallback
-      return (await api.get(`/api/conversations/by-phone/${encodeURIComponent(active.phone)}/messages?limit=500`)).data as { items: ThreadMessage[] }
+      const messages = await getConversationMessages(active.id)
+      return { items: messages.filter(isCustomerVisibleAIMessage).map(toBulkThreadMessage) }
     },
     enabled: !!active,
     refetchInterval: 5000,
@@ -116,7 +187,7 @@ export default function Chats() {
     try {
       const phone = simPhone || active?.phone || ''
       const body = simBody || 'Test inbound from dev tool'
-      const name = simName || active?.retailer_name || ''
+      const name = simName || (active ? displayName(active) : '')
       if (!phone) {
         setSimError('phone is required (pick a conversation or type a phone)')
         return
@@ -124,9 +195,10 @@ export default function Chats() {
       const res = await api.post('/api/dev/simulate-inbound', { phone, body, name })
       // Refresh both lists so the new bubble shows up immediately.
       qc.invalidateQueries({ queryKey: ['conversations'] })
+      qc.invalidateQueries({ queryKey: ['ai', 'conversations'] })
       qc.invalidateQueries({ queryKey: ['conversation'] })
       // Auto-select the conversation for this phone.
-      setActiveKey(`p:${res.data.phone}`) // works whether retailer_id is null or set
+      setActiveKey(null)
       setSimOpen(false)
       setSimBody('')
     } catch (e: any) {
@@ -159,7 +231,7 @@ export default function Chats() {
                 setSimError(null)
                 setSimOpen(true)
                 setSimPhone(active?.phone || '')
-                setSimName(active?.retailer_name || '')
+                setSimName(active ? displayName(active) : '')
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
                          bg-emerald-600 hover:bg-emerald-700 text-white text-sm
@@ -393,11 +465,11 @@ function ConversationRow({
           transition={{ type: 'spring', stiffness: 380, damping: 30 }}
         />
       )}
-      <Avatar name={c.retailer_name} />
+      <Avatar name={displayName(c)} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <span className="font-medium text-sm text-slate-900 dark:text-white truncate flex items-center gap-1.5">
-            {c.retailer_name}
+            {displayName(c)}
             <span className="inline-flex items-center text-[9px] font-semibold uppercase tracking-wide
                              text-emerald-700 dark:text-emerald-300
                              bg-emerald-50 dark:bg-emerald-500/20
@@ -415,7 +487,7 @@ function ConversationRow({
           <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate">{c.phone}</span>
         </div>
         <div className="mt-1 flex items-center gap-1.5">
-          <StatusDot status={c.last_status} failed={c.has_failed} direction={c.last_direction} />
+          <StatusDot status={c.last_status || c.status || 'active'} failed={c.has_failed} direction={c.last_direction} />
           <span className="text-xs text-slate-600 dark:text-slate-300 truncate flex-1">
             {c.last_preview || <span className="text-slate-400 dark:text-slate-500 italic">No messages yet</span>}
           </span>
@@ -463,10 +535,10 @@ function ThreadHeader({ active }: { active: Conversation }) {
       >
         <ArrowRight className="w-4 h-4 rotate-180" />
       </button>
-      <Avatar name={active.retailer_name} />
+      <Avatar name={displayName(active)} />
       <div className="flex-1 min-w-0">
         <div className="font-semibold text-slate-900 dark:text-white truncate flex items-center gap-2">
-          {active.retailer_name}
+          {displayName(active)}
           <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide
                            text-emerald-700 dark:text-emerald-300
                            bg-emerald-50 dark:bg-emerald-500/20
@@ -483,7 +555,7 @@ function ThreadHeader({ active }: { active: Conversation }) {
       <div className="flex items-center gap-2 shrink-0">
         {lead && (
           <FollowUpMenuItem
-            lead={{ id: lead.id, name: lead.name || active.retailer_name, phone: active.phone }}
+            lead={{ id: lead.id, name: lead.name || displayName(active), phone: active.phone }}
             variant="button"
           />
         )}

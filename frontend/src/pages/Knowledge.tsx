@@ -55,6 +55,7 @@ export default function Knowledge() {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [editing, setEditing] = useState<KBChunk | null>(null)
+  const [showAddChooser, setShowAddChooser] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [showURL, setShowURL] = useState(false)
   const [showGenerate, setShowGenerate] = useState(false)
@@ -70,6 +71,14 @@ export default function Knowledge() {
   const [activePreset, setActivePreset] = useState<KBPreset | null>(null)
   // Active category filter for the QuickAddPanel ('all' = no filter).
   const [quickAddCategory, setQuickAddCategory] = useState<KBPresetCategoryId | 'all'>('all')
+
+  function openGenerateDialog() {
+    if (!generateJobId) {
+      setGenerateResult(null)
+      setGenerateAsyncError(null)
+    }
+    setShowGenerate(true)
+  }
 
   const list = useQuery({
     queryKey: aiKeys.kb({ source_type: sourceType, search }),
@@ -164,24 +173,7 @@ export default function Knowledge() {
 
       <HeroBanner
         totalChunks={total}
-        onAdd={() => setShowAdd(true)}
-        onIngestURL={() => setShowURL(true)}
-        onGenerate={() => {
-          if (!generateJobId) {
-            setGenerateResult(null)
-            setGenerateAsyncError(null)
-          }
-          setShowGenerate(true)
-        }}
-      />
-
-      <QuickAddPanel
-        category={quickAddCategory}
-        setCategory={setQuickAddCategory}
-        onUseTemplate={(preset) => {
-          setActivePreset(preset)
-          setShowAdd(true)
-        }}
+        onAdd={() => setShowAddChooser(true)}
       />
 
       <KPIStrip chunks={allItems} />
@@ -198,15 +190,7 @@ export default function Knowledge() {
           setSearch={setSearch}
           sourceType={sourceType}
           setSourceType={setSourceType}
-          onAdd={() => setShowAdd(true)}
-          onIngestURL={() => setShowURL(true)}
-          onGenerate={() => {
-            if (!generateJobId) {
-              setGenerateResult(null)
-              setGenerateAsyncError(null)
-            }
-            setShowGenerate(true)
-          }}
+          onAdd={() => setShowAddChooser(true)}
         />
 
         <ChunkDetailPane
@@ -224,9 +208,38 @@ export default function Knowledge() {
 
       {/* Modals */}
       <AnimatePresence>
+        {showAddChooser && (
+          <AddKnowledgeDialog
+            category={quickAddCategory}
+            setCategory={setQuickAddCategory}
+            onClose={() => setShowAddChooser(false)}
+            onBlank={() => {
+              setActivePreset(null)
+              setShowAddChooser(false)
+              setShowAdd(true)
+            }}
+            onTemplate={(preset) => {
+              setActivePreset(preset)
+              setShowAddChooser(false)
+              setShowAdd(true)
+            }}
+            onURL={() => {
+              setShowAddChooser(false)
+              setShowURL(true)
+            }}
+            onGenerate={() => {
+              setShowAddChooser(false)
+              openGenerateDialog()
+            }}
+          />
+        )}
         {showAdd && (
-          <AddEditModal mode="add" onClose={() => setShowAdd(false)} onSaved={(newId) => {
+          <AddEditModal mode="add" preset={activePreset} onClose={() => {
             setShowAdd(false)
+            setActivePreset(null)
+          }} onSaved={(newId) => {
+            setShowAdd(false)
+            setActivePreset(null)
             qc.invalidateQueries({ queryKey: ['ai', 'kb'] })
             if (newId) setSelectedId(newId)
           }} />
@@ -261,6 +274,170 @@ export default function Knowledge() {
 // ---------------------------------------------------------------------------
 // Quick add — preset library
 // ---------------------------------------------------------------------------
+
+function AddKnowledgeDialog({
+  category, setCategory,
+  onBlank, onTemplate, onURL, onGenerate, onClose,
+}: {
+  category: KBPresetCategoryId | 'all'
+  setCategory: (c: KBPresetCategoryId | 'all') => void
+  onBlank: () => void
+  onTemplate: (preset: KBPreset) => void
+  onURL: () => void
+  onGenerate: () => void
+  onClose: () => void
+}) {
+  const filtered = category === 'all'
+    ? KB_PRESETS
+    : KB_PRESETS.filter((p) => p.category === category)
+  const templates = filtered.filter((p) => p.category !== 'custom')
+
+  return (
+    <ModalShell onClose={onClose} title="Add knowledge">
+      <div className="space-y-5">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-400/25 dark:bg-emerald-500/10">
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white text-emerald-700 shadow-sm dark:bg-emerald-500/15 dark:text-emerald-200">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="font-semibold text-slate-950 dark:text-white">What should the AI learn?</div>
+              <div className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                Pick the easiest path. Paste a full document, import a web page, start blank, or use a ready-made template.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <AddMethodCard
+            icon={Wand2}
+            title="Paste a long document"
+            text="Best for catalogs, pricing sheets, FAQs, and policies. The system splits it into searchable chunks."
+            action="Generate chunks"
+            tone="emerald"
+            onClick={onGenerate}
+          />
+          <AddMethodCard
+            icon={Globe}
+            title="Import a web page"
+            text="Use a public URL like pricing, product info, delivery policy, or support FAQ."
+            action="Ingest URL"
+            tone="sky"
+            onClick={onURL}
+          />
+          <AddMethodCard
+            icon={FileText}
+            title="Write one note"
+            text="Add one clear answer, rule, offer, or instruction manually."
+            action="Start blank"
+            tone="slate"
+            onClick={onBlank}
+          />
+          <AddMethodCard
+            icon={MessageSquare}
+            title="Use a Q&A structure"
+            text="Good when one buyer question needs one ideal answer."
+            action="Create Q&A"
+            tone="violet"
+            onClick={() => {
+              const qaPreset = KB_PRESETS.find((p) => p.title === 'Product FAQ')
+              if (qaPreset) onTemplate(qaPreset)
+              else onBlank()
+            }}
+          />
+        </div>
+
+        <div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                <Wand2 className="h-4 w-4 text-emerald-500" />
+                Starter templates
+              </div>
+              <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Choose one, fill the blanks, and save it as normal knowledge.
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+              {KB_PRESET_CATEGORIES.map((c) => {
+                const Icon = PRESET_ICONS[c.icon]
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setCategory(c.id)}
+                    className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors
+                               ${category === c.id
+                                 ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                                 : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-300 dark:hover:bg-white/5'}`}
+                  >
+                    {Icon && <Icon className="h-3 w-3" />}
+                    {c.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <motion.div
+            key={category}
+            initial="hidden"
+            animate="show"
+            variants={containerStagger}
+            className="mt-3 flex max-h-56 flex-wrap gap-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-white/10 dark:bg-white/[0.025]"
+          >
+            {templates.map((preset) => (
+              <motion.div key={preset.id} variants={itemFadeUp}>
+                <PresetChip
+                  preset={preset}
+                  onClick={() => onTemplate(preset)}
+                />
+              </motion.div>
+            ))}
+          </motion.div>
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
+function AddMethodCard({
+  icon: Icon, title, text, action, tone, onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  text: string
+  action: string
+  tone: 'emerald' | 'sky' | 'violet' | 'slate'
+  onClick: () => void
+}) {
+  const toneClass = {
+    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-200 dark:border-emerald-400/25',
+    sky: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-500/15 dark:text-sky-200 dark:border-sky-400/25',
+    violet: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-500/15 dark:text-violet-200 dark:border-violet-400/25',
+    slate: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-white/5 dark:text-slate-200 dark:border-white/10',
+  }[tone]
+
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      whileHover={{ y: -2 }}
+      whileTap={{ scale: 0.98 }}
+      className="group rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-50/40 dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-emerald-400/35 dark:hover:bg-emerald-500/10"
+    >
+      <div className={`grid h-10 w-10 place-items-center rounded-lg border ${toneClass}`}>
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="mt-3 font-semibold text-slate-950 dark:text-white">{title}</div>
+      <div className="mt-1 min-h-[44px] text-sm leading-5 text-slate-600 dark:text-slate-300">{text}</div>
+      <div className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+        {action}
+        <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+      </div>
+    </motion.button>
+  )
+}
 
 function QuickAddPanel({
   category, setCategory,
@@ -365,11 +542,9 @@ function PresetChip({ preset, onClick }: { preset: KBPreset; onClick: () => void
 // Hero banner
 // ---------------------------------------------------------------------------
 
-function HeroBanner({ totalChunks, onAdd, onIngestURL, onGenerate }: {
+function HeroBanner({ totalChunks, onAdd }: {
   totalChunks: number
   onAdd: () => void
-  onIngestURL: () => void
-  onGenerate: () => void
 }) {
   const isEmpty = totalChunks === 0
   return (
@@ -408,20 +583,14 @@ function HeroBanner({ totalChunks, onAdd, onIngestURL, onGenerate }: {
             </div>
             <p className="mt-1 text-sm text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed">
               {isEmpty
-                ? 'Add manual notes, ingest web pages, or drop in Q&A pairs. The retriever finds the most relevant chunks for every AI prompt.'
-                : 'The retriever blends semantic similarity (vector) and exact-match (BM25) so your AI gets the right context. Edit any chunk to re-embed it instantly.'}
+                ? 'Add a document, web page, note, or Q&A from one guided dialog. The AI uses this content to answer buyers accurately.'
+                : 'Keep buyer answers grounded in your own catalog, pricing, policies, and FAQs. Add new knowledge from one guided dialog whenever something changes.'}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          <SecondaryButton onClick={onIngestURL}>
-            <Globe className="w-4 h-4" /> Ingest URL
-          </SecondaryButton>
-          <SecondaryButton onClick={onGenerate}>
-            <Wand2 className="w-4 h-4" /> Generate
-          </SecondaryButton>
           <PrimaryButton onClick={onAdd}>
-            <Plus className="w-4 h-4" /> {isEmpty ? 'Add your first chunk' : 'Add chunk'}
+            <Plus className="w-4 h-4" /> {isEmpty ? 'Add your first knowledge' : 'Add knowledge'}
           </PrimaryButton>
         </div>
       </div>
@@ -484,7 +653,7 @@ function ChunkListPane({
   chunks, total, loading, error,
   selectedId, onSelect,
   search, setSearch, sourceType, setSourceType,
-  onAdd, onIngestURL, onGenerate,
+  onAdd,
 }: {
   chunks: KBChunk[]
   total: number
@@ -497,8 +666,6 @@ function ChunkListPane({
   sourceType: string
   setSourceType: (s: string) => void
   onAdd: () => void
-  onIngestURL: () => void
-  onGenerate: () => void
 }) {
   return (
     <Card className="lg:sticky lg:top-4" hover={false}>
@@ -545,8 +712,6 @@ function ChunkListPane({
           <ListEmpty
             hasFilters={!!(search || sourceType)}
             onAdd={onAdd}
-            onIngestURL={onIngestURL}
-            onGenerate={onGenerate}
             onClearFilters={() => { setSearch(''); setSourceType('') }}
           />
         ) : (
@@ -573,12 +738,10 @@ function ChunkListPane({
 }
 
 function ListEmpty({
-  hasFilters, onAdd, onIngestURL, onGenerate, onClearFilters,
+  hasFilters, onAdd, onClearFilters,
 }: {
   hasFilters: boolean
   onAdd: () => void
-  onIngestURL: () => void
-  onGenerate: () => void
   onClearFilters: () => void
 }) {
   if (hasFilters) {
@@ -614,17 +777,11 @@ function ListEmpty({
         No knowledge yet
       </div>
       <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-[260px] mx-auto leading-relaxed">
-        Add manual notes or ingest web pages to ground the AI's answers in your own content.
+        Add a document, web page, note, or Q&A to ground the AI's answers in your own content.
       </div>
       <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
-        <SecondaryButton onClick={onIngestURL}>
-          <Globe className="w-3.5 h-3.5" /> Ingest URL
-        </SecondaryButton>
-        <SecondaryButton onClick={onGenerate}>
-          <Wand2 className="w-3.5 h-3.5" /> Generate
-        </SecondaryButton>
         <PrimaryButton onClick={onAdd}>
-          <Plus className="w-3.5 h-3.5" /> Add chunk
+          <Plus className="w-3.5 h-3.5" /> Add knowledge
         </PrimaryButton>
       </div>
     </div>
@@ -1336,7 +1493,7 @@ function ModalShell({ children, onClose, title }: {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
-      className="fixed inset-0 z-50 grid place-items-center p-4
+      className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-3 sm:p-4
                  bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
@@ -1346,12 +1503,13 @@ function ModalShell({ children, onClose, title }: {
         exit={{ opacity: 0, scale: 0.97, y: 8 }}
         transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
         className="relative w-full max-w-2xl
+                   max-h-[calc(100vh-2rem)] overflow-hidden
                    rounded-lg border border-slate-200 dark:border-white/10
                    bg-white dark:bg-[#0a1124]
-                   shadow-xl"
+                   shadow-xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between shrink-0">
           <h2 className="font-semibold text-slate-900 dark:text-white">{title}</h2>
           <button type="button" onClick={onClose}
             className="p-1.5 rounded-md text-slate-500 dark:text-slate-400
@@ -1359,7 +1517,7 @@ function ModalShell({ children, onClose, title }: {
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="min-h-0 overflow-y-auto overscroll-contain p-5">{children}</div>
       </motion.div>
     </motion.div>
   )

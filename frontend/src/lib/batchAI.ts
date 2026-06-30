@@ -8,7 +8,8 @@
 
 import { api } from '@/lib/api'
 import type {
-  AIHumanReviewItem, AIHumanReviewList, AuditLog, BatchAIFollowup, BatchAIFollowupDuplicate, BatchAIRecipient,
+  AIDecisionLog, AIHumanReviewItem, AIHumanReviewList, AIWorkflowList, AIWorkflowState,
+  AuditLog, BatchAIFollowup, BatchAIFollowupDuplicate, BatchAIRecipient,
   BatchAIRecipientDetail, BatchFollowupConfig, EffectiveAIAgent,
   FollowupEnrollmentRow, SetBatchAgentPayload, StartBatchFollowupOpts,
   StartBatchFollowupResult, UploadBatch,
@@ -106,6 +107,9 @@ export const batchAIKeys = {
   followups: (params: ListFollowupsParams = {}) => ['ai', 'followups', params] as const,
   crmInsights: (limit = 200) => ['ai', 'followups', 'crm-insights', limit] as const,
   crmSummary: (batchId: number, historyLimit: number) => ['batches', batchId, 'ai-followup', 'crm-summary', historyLimit] as const,
+  workflows: (params: ListAIWorkflowParams = {}) => ['ai', 'workflows', params] as const,
+  workflow: (recipientId: number) => ['batch-ai-recipient', recipientId, 'workflow'] as const,
+  decisions: (recipientId: number, limit = 20) => ['batch-ai-recipient', recipientId, 'decisions', limit] as const,
   humanReview: (params: ListHumanReviewParams = {}) => ['ai', 'human-review', params] as const,
   // Per-batch agent override (Phase 8 — multi-agent). Resolves to the
   // live agent for a batch (override OR global default) plus a
@@ -120,6 +124,48 @@ export const batchAIKeys = {
   recipientByBatch: (batchId: number) => ['batch-ai-recipient', 'by-batch', batchId] as const,
   // History panel — audit entries scoped to one recipient.
   audit: (recipientId: number) => ['batch-ai-recipient', recipientId, 'audit'] as const,
+}
+
+// ---------------------------------------------------------------------------
+// AI workflow states / decision log
+// ---------------------------------------------------------------------------
+
+export interface ListAIWorkflowParams {
+  state?: string
+  batch_id?: number
+  search?: string
+  limit?: number
+  offset?: number
+  refresh?: boolean
+}
+
+export async function listAIWorkflows(params: ListAIWorkflowParams = {}): Promise<AIWorkflowList> {
+  const { data } = await api.get('/api/ai/workflows', { params })
+  return data as AIWorkflowList
+}
+
+export async function getBatchAIRecipientWorkflow(recipientId: number): Promise<AIWorkflowState> {
+  const { data } = await api.get(`/api/batch-ai-recipients/${recipientId}/workflow`)
+  return data as AIWorkflowState
+}
+
+export async function generateBatchAIRecipientWorkflowBrief(
+  recipientId: number,
+  body: { prompt?: string; history_limit?: 10 | 20 } = {},
+): Promise<AIWorkflowState> {
+  const { data } = await api.post(`/api/batch-ai-recipients/${recipientId}/workflow/ai-brief`, {
+    prompt: body.prompt || '',
+    history_limit: body.history_limit || 20,
+  })
+  return data as AIWorkflowState
+}
+
+export async function listBatchAIRecipientDecisions(
+  recipientId: number,
+  limit = 20,
+): Promise<{ items: AIDecisionLog[]; total: number }> {
+  const { data } = await api.get(`/api/batch-ai-recipients/${recipientId}/decisions`, { params: { limit } })
+  return data as { items: AIDecisionLog[]; total: number }
 }
 
 // ---------------------------------------------------------------------------

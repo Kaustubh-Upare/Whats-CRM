@@ -147,6 +147,13 @@ func (r *Retriever) retrieve(ctx context.Context, adminID int64, agentID *int64,
 
 	// Re-rank (cheap heuristic — sort by final score, drop low).
 	chunks = r.rerank(chunks)
+	if len(chunks) == 0 && isBroadCatalogQuery(query) {
+		fallback, ferr := r.catalogFallback(ctx, adminID, agentID)
+		if ferr != nil {
+			return nil, fmt.Errorf("catalog fallback: %w", ferr)
+		}
+		chunks = r.rerank(fallback)
+	}
 
 	// Cache.
 	if agentID == nil {
@@ -155,6 +162,58 @@ func (r *Retriever) retrieve(ctx context.Context, adminID int64, agentID *int64,
 		}
 	}
 	return chunks, nil
+}
+
+// catalogFallback gives broad "what do you sell / list products" questions
+// a small, scoped knowledge window even when exact keyword/vector retrieval
+// misses. This is important for natural WhatsApp wording: a catalog chunk may
+// list "kaju katli, ladoo, gulab jamun" without containing the word "product".
+func (r *Retriever) catalogFallback(ctx context.Context, adminID int64, agentID *int64) ([]RetrievedChunk, error) {
+	limit := r.config.TopK
+	if limit <= 0 {
+		limit = DefaultConfig().TopK
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, content, source_type, coalesce(source_ref, ''), coalesce(title, ''), updated_at
+		FROM bc_ai_kb_chunks
+		WHERE admin_user_id = $1
+		  AND (
+		    $2::bigint IS NULL
+		    OR NOT EXISTS (
+		      SELECT 1 FROM bc_ai_agent_kb_chunks scope
+		      WHERE scope.admin_user_id = $1 AND scope.agent_id = $2
+		    )
+		    OR EXISTS (
+		      SELECT 1 FROM bc_ai_agent_kb_chunks scope
+		      WHERE scope.admin_user_id = $1
+		        AND scope.agent_id = $2
+		        AND scope.kb_chunk_id = bc_ai_kb_chunks.id
+		    )
+		  )
+		ORDER BY
+		  CASE source_type WHEN 'qa_pair' THEN 0 WHEN 'manual' THEN 1 ELSE 2 END,
+		  updated_at DESC,
+		  id DESC
+		LIMIT $3
+	`, adminID, nullableAgentID(agentID), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []RetrievedChunk{}
+	for rows.Next() {
+		var c RetrievedChunk
+		var updatedAt time.Time
+		if err := rows.Scan(&c.ID, &c.Content, &c.SourceType, &c.SourceRef, &c.Title, &updatedAt); err != nil {
+			return nil, err
+		}
+		c.VectorSim = 0
+		c.KeywordSim = 0.05
+		c.FinalScore = 0.12
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func (r *Retriever) search(ctx context.Context, adminID int64, agentID *int64, query string) ([]RetrievedChunk, error) {
@@ -433,6 +492,43 @@ func tokenizeQuery(query string) []string {
 		}
 	}
 	return terms
+}
+
+func isBroadCatalogQuery(query string) bool {
+	parts := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(query)), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	if len(parts) == 0 {
+		return false
+	}
+	q := " " + strings.Join(parts, " ") + " "
+	needles := []string{
+		" what do you sell ",
+		" what do you have ",
+		" what all do you have ",
+		" what all you have ",
+		" list products ",
+		" list the products ",
+		" show products ",
+		" show me products ",
+		" product list ",
+		" products list ",
+		" product catalog ",
+		" catalogue ",
+		" catalog ",
+		" menu ",
+		" available products ",
+		" products available ",
+		" kinds of ",
+		" categories ",
+		" what are you selling ",
+	}
+	for _, needle := range needles {
+		if strings.Contains(q, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 var retrievalStopWords = map[string]bool{

@@ -309,6 +309,9 @@ function ReviewDetail({
       </Card>
     )
   }
+  const hasAIHelp = Boolean(item.ai_summary || item.ai_next_action || item.ai_suggested_reply)
+  const reviewReason = item.ai_summary || item.reason_detail || 'This phone has a signal that may need operator attention.'
+  const nextAction = item.ai_next_action || item.suggested_action || 'Open the timeline and decide whether AI should continue.'
 
   return (
     <Card hover={false} className="!p-0 overflow-hidden">
@@ -354,11 +357,31 @@ function ReviewDetail({
 
       <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_360px] gap-4 p-5">
         <div className="space-y-4">
-          <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03]">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Why this needs review</div>
-            <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">{item.reason_detail}</p>
+          <section className={`rounded-lg border p-4 ${
+            hasAIHelp
+              ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-400/20 dark:bg-emerald-500/[0.08]'
+              : 'border-slate-200 bg-white dark:border-white/10 dark:bg-white/[0.03]'
+          }`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Why this needs review</div>
+                <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{reviewReason}</p>
+              </div>
+              <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${
+                hasAIHelp
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200'
+                  : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300'
+              }`}>
+                {hasAIHelp ? 'AI brief' : 'Rule signal'}
+              </span>
+            </div>
+            {hasAIHelp && item.reason_detail && (
+              <div className="mt-3 rounded-md border border-emerald-200/70 bg-white/70 p-3 text-xs leading-5 text-emerald-900/80 dark:border-emerald-400/15 dark:bg-slate-950/20 dark:text-emerald-100/80">
+                Backend signal: {item.reason_detail}
+              </div>
+            )}
             <div className="mt-4 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Recommended action</div>
-            <p className="mt-2 text-sm font-medium text-slate-900 dark:text-white">{item.suggested_action}</p>
+            <p className="mt-2 text-sm font-medium leading-6 text-slate-900 dark:text-white">{nextAction}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               {item.labels.map((label) => (
                 <span key={label} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 dark:border-white/10 dark:bg-white/10 dark:text-slate-300">
@@ -390,7 +413,7 @@ function ReviewDetail({
                 <Bot className="h-4 w-4" /> AI help
               </div>
               <p className="mt-1 text-xs leading-5 text-emerald-800/75 dark:text-emerald-200/75">
-                Generate a concise summary, reply draft, and next action from the latest stored chat.
+                OpenAI/Bedrock reads the recent thread, assigned agent, and matching knowledge once, then caches the summary, reply draft, and next action here.
               </p>
             </div>
             <Sparkles className="h-5 w-5 shrink-0 text-emerald-500" />
@@ -406,15 +429,15 @@ function ReviewDetail({
 
           <SecondaryButton onClick={onAIHelp} disabled={aiLoading} className="mt-3 w-full justify-center">
             <Sparkles className={`w-4 h-4 ${aiLoading ? 'animate-spin' : ''}`} />
-            {aiLoading ? 'Generating...' : 'Generate AI help'}
+            {aiLoading ? 'Generating...' : hasAIHelp ? 'Refresh AI brief' : 'Generate AI brief'}
           </SecondaryButton>
 
           {aiError && <div className="mt-3"><ErrorBox msg={aiError} /></div>}
 
           <div className="mt-4 space-y-3">
-            <AdviceBox title="Summary" value={item.ai_summary || item.ai_error || 'Generate AI help to get a quick read of this phone.'} />
+            <AdviceBox title="AI read" value={item.ai_summary || item.ai_error || 'Generate AI brief to get buyer intent, urgency, evidence, risk, and knowledge-grounded next steps in one cached call.'} />
             <AdviceBox title="Suggested reply" value={item.ai_suggested_reply || 'A reply draft will appear here after generation.'} />
-            <AdviceBox title="Next action" value={item.ai_next_action || item.suggested_action || 'Open the timeline if you need the full context.'} />
+            <AdviceBox title="Next action" value={nextAction} />
           </div>
         </aside>
       </div>

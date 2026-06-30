@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/whatsyitc/backend/internal/ai/retrieval"
 	"github.com/whatsyitc/backend/internal/llm"
 )
 
@@ -58,6 +59,10 @@ type FollowUpDraft struct {
 // configured. The worker treats this the same as a send failure
 // (3× retry → pause with reason='send_failed').
 var ErrFollowUpNoLLM = errors.New("orchestrator: no LLM configured")
+
+// ErrFollowUpNoAgent is returned before retrieval or LLM work when this
+// workspace has no enabled agent for the current batch/user context.
+var ErrFollowUpNoAgent = errors.New("orchestrator: no enabled AI agent configured")
 
 // GenerateFollowUp returns one short, contextually-aware follow-up
 // message body. It does NOT send the message — the worker (or the
@@ -127,11 +132,18 @@ func (o *Orchestrator) GenerateFollowUp(
 	if err != nil {
 		return "", err
 	}
+	if cfg.ID == 0 {
+		return "", ErrFollowUpNoAgent
+	}
 	if tone == "" {
 		tone = cfg.Tone
 	}
 	if tone == "" {
 		tone = "friendly"
+	}
+	userContext, err := o.loadAIUserPromptContext(ctx, adminID, phone)
+	if err != nil {
+		slog.Warn("orchestrator: follow-up load AI user profile", "phone", phone, "err", err)
 	}
 
 	// Load recent history (last 6 turns) so the LLM can reference
@@ -142,12 +154,17 @@ func (o *Orchestrator) GenerateFollowUp(
 		history = nil
 	}
 	trimmed := trimHistory(history, followUpMaxHistory)
+	chunks := o.retrieveFollowUpKnowledge(ctx, adminID, cfg.ID, goal, lastTopic, trimmed)
 
 	// Build the follow-up prompt + messages. mode='agentic' uses
 	// a different prompt that asks the LLM to decide whether to
 	// follow up at all.
+	var promptContexts []aiUserPromptContext
+	if userContext != nil {
+		promptContexts = append(promptContexts, *userContext)
+	}
 	system := withInlineHumanReviewInstructions(
-		buildFollowUpPrompt(cfg, goal, lastTopic, tone, mode),
+		buildFollowUpPrompt(cfg, goal, lastTopic, tone, mode, chunks, promptContexts...),
 		"Scheduled AI follow-up. If the phone looks hot, confused, risky, or needs a human check, set requires_review=true. If this is just normal cadence, set requires_review=false.",
 	)
 	msgs := historyToMessages(trimmed)
@@ -180,21 +197,42 @@ func (o *Orchestrator) GenerateFollowUp(
 
 	text, reviewSignal := parseInlineHumanReviewOutput(resp.Text)
 	text = strings.TrimSpace(text)
-	if strings.EqualFold(text, "<NO_FOLLOWUP>") {
+	explicitSkip := isExplicitNoFollowUp(resp.Text, text)
+	if explicitSkip {
 		text = ""
 	}
-	// In agentic mode, an empty body is a *legitimate* answer: the
-	// LLM decided no follow-up is appropriate right now. Return ""
-	// (no error) so the worker can advance the enrollment to the
-	// next tick without sending.
+	if reviewSignal == nil {
+		reviewSignal = fallbackInlineHumanReviewSignal(
+			buildFollowUpUserInstruction(lastTopic, mode),
+			text,
+			"followup",
+			len(chunks) > 0,
+			0.8,
+			"followup_generation",
+		)
+	}
+	// In agentic mode, an empty body is legitimate only when the model
+	// explicitly returned the sentinel. Some providers occasionally emit
+	// an empty customer_reply block or internal function-call marker; that
+	// should not silently skip a scheduled touch.
 	if text == "" {
-		o.saveInlineHumanReviewSignal(ctx, adminID, phone, reviewSignal, "", resp.Model, firstNonEmpty(resp.Provider, cheapDecision.Provider), "followup_skip")
-		if mode == "agentic" {
+		if mode == "agentic" && explicitSkip {
+			o.saveInlineHumanReviewSignal(ctx, adminID, phone, reviewSignal, "", resp.Model, firstNonEmpty(resp.Provider, cheapDecision.Provider), "followup_skip")
 			slog.Info("orchestrator: agentic follow-up returned no body — skipping this tick",
 				"phone", phone, "admin", adminID)
 			return "", nil
 		}
-		return "", errors.New("orchestrator: empty follow-up body from LLM")
+		text = fallbackFollowUpBody(goal, lastTopic, chunks)
+		if reviewSignal != nil {
+			reviewSignal.Summary = firstNonEmpty(reviewSignal.Summary, "The model returned an empty follow-up, so WhatsyITC used a safe short nudge.")
+			reviewSignal.NextAction = firstNonEmpty(reviewSignal.NextAction, "Let AI continue and monitor the next buyer reply.")
+			if reviewSignal.ReasonCode == "" {
+				reviewSignal.ReasonCode = "followup_scheduled"
+				reviewSignal.ReasonLabel = "Follow-up scheduled"
+			}
+		}
+		slog.Warn("orchestrator: empty follow-up body from LLM, using safe fallback",
+			"phone", phone, "admin", adminID, "mode", mode)
 	}
 
 	// Hard cap on length. WhatsApp UX is short.
@@ -210,6 +248,72 @@ func (o *Orchestrator) GenerateFollowUp(
 		resp.Model, resp.Usage, 0, cheapDecision, 0, 0)
 
 	return text, nil
+}
+
+func (o *Orchestrator) retrieveFollowUpKnowledge(ctx context.Context, adminID, agentID int64, goal, lastTopic string, history []llm.Message) []retrieval.RetrievedChunk {
+	if o.retriever == nil {
+		return nil
+	}
+	query := buildFollowUpRetrievalQuery(goal, lastTopic, history)
+	if strings.TrimSpace(query) == "" {
+		query = "products catalog pricing offers follow-up"
+	}
+	chunks, err := o.retriever.RetrieveForAgent(ctx, adminID, agentID, query)
+	if err != nil {
+		slog.Warn("orchestrator: follow-up retrieval failed, continuing", "err", err)
+		return nil
+	}
+	return chunks
+}
+
+func buildFollowUpRetrievalQuery(goal, lastTopic string, history []llm.Message) string {
+	parts := []string{}
+	if s := strings.TrimSpace(goal); s != "" {
+		parts = append(parts, s)
+	}
+	if s := strings.TrimSpace(lastTopic); s != "" {
+		parts = append(parts, s)
+	}
+	for i := len(history) - 1; i >= 0 && len(parts) < 6; i-- {
+		m := history[i]
+		if m.Role != llm.RoleUser {
+			continue
+		}
+		content := strings.TrimSpace(m.Content)
+		if content == "" {
+			continue
+		}
+		parts = append(parts, content)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
+}
+
+func isExplicitNoFollowUp(raw, parsed string) bool {
+	if strings.EqualFold(strings.TrimSpace(parsed), "<NO_FOLLOWUP>") {
+		return true
+	}
+	clean := cleanupVisibleAIText(raw)
+	return strings.EqualFold(strings.TrimSpace(clean), "<NO_FOLLOWUP>")
+}
+
+func fallbackFollowUpBody(goal, lastTopic string, chunks []retrieval.RetrievedChunk) string {
+	topic := strings.TrimSpace(lastTopic)
+	if topic != "" {
+		return "Hi, just checking in about " + topic + ". Would you like me to help with the next step?"
+	}
+	if len(chunks) > 0 {
+		snippet := compactFallbackSnippet(chunks[0].Content, 160)
+		if snippet != "" {
+			return "Hi, just checking in. I can help with " + snippet + ". Would you like details or pricing?"
+		}
+	}
+	if strings.TrimSpace(goal) != "" {
+		return "Hi, just following up on this. Would you like me to help you move ahead?"
+	}
+	return "Hi, just checking in. Would you like me to help with anything today?"
 }
 
 // GenerateFollowUpDraft creates an operator preview from the latest 10 or 20
@@ -243,11 +347,18 @@ func (o *Orchestrator) GenerateFollowUpDraft(
 	if err != nil {
 		return nil, err
 	}
+	if cfg.ID == 0 {
+		return nil, ErrFollowUpNoAgent
+	}
 	if strings.TrimSpace(tone) == "" {
 		tone = cfg.Tone
 	}
 	if strings.TrimSpace(tone) == "" {
 		tone = "friendly"
+	}
+	userContext, err := o.loadAIUserPromptContext(ctx, adminID, phone)
+	if err != nil {
+		slog.Warn("orchestrator: draft load AI user profile", "phone", phone, "err", err)
 	}
 
 	history, err := o.loadHistory(ctx, adminID, conversationKey(phone))
@@ -256,6 +367,7 @@ func (o *Orchestrator) GenerateFollowUpDraft(
 		history = nil
 	}
 	trimmed := trimHistory(history, historyLimit)
+	chunks := o.retrieveFollowUpKnowledge(ctx, adminID, cfg.ID, instruction, lastTopic, trimmed)
 
 	var contextID sql.NullInt64
 	if err := o.pool.QueryRow(ctx, `
@@ -268,7 +380,11 @@ func (o *Orchestrator) GenerateFollowUpDraft(
 	}
 	contextMessageID := int64PtrFromNull(contextID)
 
-	system := buildFollowUpPrompt(cfg, instruction, lastTopic, tone, "custom")
+	var promptContexts []aiUserPromptContext
+	if userContext != nil {
+		promptContexts = append(promptContexts, *userContext)
+	}
+	system := buildFollowUpPrompt(cfg, instruction, lastTopic, tone, "custom", chunks, promptContexts...)
 	msgs := historyToMessages(trimmed)
 	msgs = append(msgs, llm.Message{
 		Role:    llm.RoleUser,
@@ -292,7 +408,7 @@ func (o *Orchestrator) GenerateFollowUpDraft(
 		return nil, err
 	}
 
-	text := strings.TrimSpace(resp.Text)
+	text := cleanupVisibleAIText(resp.Text)
 	if text == "" {
 		return nil, errors.New("orchestrator: empty follow-up draft from LLM")
 	}
@@ -357,9 +473,9 @@ func buildFollowUpUserInstruction(lastTopic, mode string) string {
 // nothing if it isn't. The LLM is told to output "<NO_FOLLOWUP>" as
 // a sentinel — which we then strip to an empty string before
 // returning to the caller.
-func buildFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone, mode string) string {
+func buildFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone, mode string, chunks []retrieval.RetrievedChunk, userCtx ...aiUserPromptContext) string {
 	if mode == "agentic" {
-		return buildAgenticFollowUpPrompt(cfg, goal, lastTopic, tone)
+		return buildAgenticFollowUpPrompt(cfg, goal, lastTopic, tone, chunks, userCtx...)
 	}
 	var b strings.Builder
 	b.WriteString("You are ")
@@ -378,6 +494,10 @@ func buildFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone, mode string)
 		b.WriteString(persona)
 		b.WriteString("\n\n")
 	}
+	if block := formatAIUserPromptContext(userCtx...); block != "" {
+		b.WriteString(block)
+		b.WriteString("\n")
+	}
 
 	if goal != "" {
 		b.WriteString("GOAL OF THIS FOLLOW-UP: ")
@@ -392,15 +512,26 @@ func buildFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone, mode string)
 		b.WriteString(strings.TrimSpace(lastTopic))
 		b.WriteString("\n\n")
 	}
+	if len(chunks) > 0 {
+		b.WriteString("RELEVANT KNOWLEDGE BASE:\n")
+		b.WriteString(retrieval.FormatForPrompt(chunks))
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString("RULES:\n")
+	if len(chunks) > 0 {
+		b.WriteString("- Use the relevant knowledge above when the follow-up mentions products, pricing, offers, availability, delivery, or policies.\n")
+		b.WriteString("- Only mention exact products, prices, features, offers, or commitments that appear in the knowledge above.\n")
+	} else {
+		b.WriteString("- No matching knowledge was found. Use the chat context and ask a helpful next-step question, but do not invent catalog, pricing, features, offers, or commitments.\n")
+	}
 	b.WriteString("- Reference the last topic naturally. Do not repeat it verbatim.\n")
 	b.WriteString("- Plain text only. No markdown, no bullet lists, no links.\n")
 	b.WriteString("- 1-3 sentences. End with a question that prompts a reply.\n")
 	b.WriteString("- Sound like a real person checking in, not a campaign or bot.\n")
 	b.WriteString("- Use at most one friendly emoji if it fits the tone. Skip emoji for complaints, payment issues, or sensitive conversations.\n")
 	b.WriteString("- Never ask for the customer's phone number; WhatsApp already gives us the number.\n")
-	b.WriteString("- Do not invent prices, features, or commitments. If you don't know, say you'll check and get back.\n")
+	b.WriteString("- If the needed fact is not in knowledge or chat history, say you'll check and get back.\n")
 
 	return b.String()
 }
@@ -411,7 +542,7 @@ func buildFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone, mode string)
 // only then write the message. The "<NO_FOLLOWUP>" sentinel is
 // what makes the no-skip path observable to the caller — the
 // orchestrator strips it before returning.
-func buildAgenticFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone string) string {
+func buildAgenticFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone string, chunks []retrieval.RetrievedChunk, userCtx ...aiUserPromptContext) string {
 	var b strings.Builder
 	b.WriteString("You are ")
 	b.WriteString(strings.TrimSpace(cfg.Name))
@@ -432,6 +563,10 @@ func buildAgenticFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone string
 		b.WriteString(persona)
 		b.WriteString("\n\n")
 	}
+	if block := formatAIUserPromptContext(userCtx...); block != "" {
+		b.WriteString(block)
+		b.WriteString("\n")
+	}
 
 	if goal != "" {
 		b.WriteString("OVERALL GOAL: ")
@@ -442,6 +577,11 @@ func buildAgenticFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone string
 	if lastTopic != "" {
 		b.WriteString("LAST REAL TOPIC IN THE CHAT: ")
 		b.WriteString(strings.TrimSpace(lastTopic))
+		b.WriteString("\n\n")
+	}
+	if len(chunks) > 0 {
+		b.WriteString("RELEVANT KNOWLEDGE BASE:\n")
+		b.WriteString(retrieval.FormatForPrompt(chunks))
 		b.WriteString("\n\n")
 	}
 
@@ -457,9 +597,15 @@ func buildAgenticFollowUpPrompt(cfg agentConfigRow, goal, lastTopic, tone string
 	b.WriteString("- ends with a question that prompts a reply\n")
 	b.WriteString("- is plain text (no markdown, no bullet lists, no links)\n")
 	b.WriteString("- sounds like a real person checking in, not a campaign or bot\n")
+	if len(chunks) > 0 {
+		b.WriteString("- uses the relevant knowledge above when mentioning products, pricing, offers, availability, delivery, or policies\n")
+		b.WriteString("- only mentions exact products, prices, features, offers, or commitments from the knowledge above\n")
+	} else {
+		b.WriteString("- uses the chat context and asks a useful next-step question without inventing catalog, pricing, features, offers, or commitments\n")
+	}
 	b.WriteString("- uses at most one friendly emoji if it fits, and no emoji for complaints/payment/sensitive topics\n")
 	b.WriteString("- never asks for the customer's phone number because WhatsApp already gives it to us\n")
-	b.WriteString("- does NOT invent prices, features, or commitments\n")
+	b.WriteString("- says you'll check and get back if the needed fact is not in knowledge or chat history\n")
 	b.WriteString("- feels like a real person, not a marketing blast\n\n")
 
 	b.WriteString("OUTPUT FORMAT: either a single short message, or the literal token <NO_FOLLOWUP> on its own.\n")

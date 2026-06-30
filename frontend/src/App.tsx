@@ -23,6 +23,7 @@ import Settings from '@/pages/Settings'
 import Credentials from '@/pages/Credentials'
 import SetupGuide from '@/pages/SetupGuide'
 import AIDashboard from '@/pages/AIDashboard'
+import AIUsers from '@/pages/AIUsers'
 import Agent from '@/pages/Agent'
 import Knowledge from '@/pages/Knowledge'
 import Conversations from '@/pages/Conversations'
@@ -112,6 +113,7 @@ export default function App() {
 
         {/* AI Workflows workspace — agent, knowledge, follow-ups, CRM, human review */}
         <Route path="ai" element={<AIDashboard />} />
+        <Route path="ai/users" element={<AIUsers />} />
         <Route path="ai/agent" element={<Agent />} />
         <Route path="ai/knowledge" element={<Knowledge />} />
         <Route path="ai/conversations" element={<Conversations />} />

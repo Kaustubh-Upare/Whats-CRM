@@ -36,3 +36,63 @@ func TestParseInlineHumanReviewOutputJSONEnvelope(t *testing.T) {
 		t.Fatalf("requires_review = true, want false")
 	}
 }
+
+func TestFallbackInlineHumanReviewSignalKeepsPriceQuestionOutOfReview(t *testing.T) {
+	signal := fallbackInlineHumanReviewSignal(
+		"What is the wholesale price?",
+		"Sure, the wholesale price starts at Rs 120.",
+		"pricing",
+		true,
+		0.8,
+		"inbound_reply",
+	)
+	if signal == nil {
+		t.Fatal("signal nil")
+	}
+	if signal.RequiresReview {
+		t.Fatal("requires_review = true, want false for normal price question")
+	}
+	if signal.ReasonCode != "price_question" || signal.Severity != "high" {
+		t.Fatalf("unexpected signal: %+v", signal)
+	}
+}
+
+func TestFallbackInlineHumanReviewSignalFlagsHumanRequest(t *testing.T) {
+	signal := fallbackInlineHumanReviewSignal(
+		"Please ask a person to call me",
+		"Sure, I will connect you with the team.",
+		"handoff",
+		true,
+		0.8,
+		"inbound_reply",
+	)
+	if signal == nil {
+		t.Fatal("signal nil")
+	}
+	if !signal.RequiresReview {
+		t.Fatal("requires_review = false, want true")
+	}
+	if signal.ReasonCode != "human_requested" || signal.Severity != "critical" {
+		t.Fatalf("unexpected signal: %+v", signal)
+	}
+}
+
+func TestFallbackInlineHumanReviewSignalKeepsSafeReplyLowPriority(t *testing.T) {
+	signal := fallbackInlineHumanReviewSignal(
+		"Thanks",
+		"You're welcome!",
+		"general",
+		true,
+		0.7,
+		"inbound_reply",
+	)
+	if signal == nil {
+		t.Fatal("signal nil")
+	}
+	if signal.RequiresReview {
+		t.Fatalf("requires_review = true, want false: %+v", signal)
+	}
+	if signal.ReasonCode != "ai_handled" || signal.PriorityScore >= 45 {
+		t.Fatalf("unexpected low priority signal: %+v", signal)
+	}
+}

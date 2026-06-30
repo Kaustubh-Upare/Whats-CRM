@@ -12,6 +12,18 @@ import (
 	"github.com/whatsyitc/backend/internal/store"
 )
 
+type UploadMapping struct {
+	Phone         string            `json:"phone"`
+	Name          string            `json:"name"`
+	RetailerCode  string            `json:"retailer_code"`
+	InvoiceNumber string            `json:"invoice_number"`
+	BillingAmount string            `json:"billing_amount"`
+	DueDate       string            `json:"due_date"`
+	PaymentLink   string            `json:"payment_link"`
+	Language      string            `json:"language"`
+	TemplateVars  map[string]string `json:"template_vars"`
+}
+
 // Required headers (case-insensitive). The Excel template on the frontend ships
 // with these exact names; we look them up by lower-cased key.
 var requiredHeaders = []string{
@@ -113,6 +125,135 @@ func ParseRow(rowNum int, m map[string]string) (*models.BillingRecord, []models.
 	rec.IsValid = len(errs) == 0
 	rec.ValidationErrors = errs
 	return rec, errs
+}
+
+// ParseMappedRow converts a row using an operator-provided column mapping.
+// Template-first upload only requires a WhatsApp number. Extra spreadsheet
+// columns are preserved in RawRow and ignored safely.
+func ParseMappedRow(rowNum int, original map[string]string, mapping UploadMapping) (*models.BillingRecord, []models.ValidationError) {
+	rec := &models.BillingRecord{RowNumber: rowNum}
+	var errs []models.ValidationError
+
+	phoneRaw := mappedValue(original, mapping.Phone)
+	phone := NormalizeWhatsAppNumber(phoneRaw)
+	if phone == "" {
+		errs = append(errs, models.ValidationError{Field: "whatsapp_number", Code: "required", Message: "map a phone column for WhatsApp sending"})
+	} else if !isValidE164ish(phone) {
+		errs = append(errs, models.ValidationError{Field: "whatsapp_number", Code: "format", Message: "phone must include 10-15 digits after cleanup"})
+	} else {
+		rec.WhatsappNumber = &phone
+	}
+
+	name := strings.TrimSpace(mappedValue(original, mapping.Name))
+	if name == "" && phone != "" {
+		if len(phone) >= 4 {
+			name = "Customer " + phone[len(phone)-4:]
+		} else {
+			name = "Customer"
+		}
+	}
+	if name != "" {
+		rec.RetailerName = &name
+	}
+
+	code := strings.TrimSpace(mappedValue(original, mapping.RetailerCode))
+	if code == "" {
+		if phone != "" {
+			code = phone
+		} else {
+			code = fmt.Sprintf("row-%d", rowNum)
+		}
+	}
+	rec.RetailerCode = &code
+
+	if inv := strings.TrimSpace(mappedValue(original, mapping.InvoiceNumber)); inv != "" {
+		rec.InvoiceNumber = &inv
+	}
+	if amtStr := strings.TrimSpace(mappedValue(original, mapping.BillingAmount)); amtStr != "" {
+		amt, err := strconv.ParseFloat(strings.ReplaceAll(amtStr, ",", ""), 64)
+		if err != nil || amt < 0 {
+			errs = append(errs, models.ValidationError{Field: "billing_amount", Code: "format", Message: "mapped amount must be a non-negative number"})
+		} else {
+			rec.BillingAmount = &amt
+		}
+	}
+	if dueStr := strings.TrimSpace(mappedValue(original, mapping.DueDate)); dueStr != "" {
+		d, err := parseDate(dueStr)
+		if err != nil {
+			errs = append(errs, models.ValidationError{Field: "due_date", Code: "format", Message: "mapped due date should be YYYY-MM-DD or DD/MM/YYYY"})
+		} else {
+			rec.DueDate = &d
+		}
+	}
+	if v := strings.TrimSpace(mappedValue(original, mapping.PaymentLink)); v != "" {
+		rec.PaymentLink = &v
+	}
+	if v := strings.TrimSpace(mappedValue(original, mapping.Language)); v != "" {
+		rec.Language = &v
+	}
+
+	templateParams := map[string]string{}
+	for token, column := range mapping.TemplateVars {
+		token = strings.Trim(strings.TrimSpace(token), "{}")
+		if token == "" || strings.TrimSpace(column) == "" {
+			continue
+		}
+		templateParams[token] = strings.TrimSpace(mappedValue(original, column))
+	}
+
+	raw := map[string]any{
+		"original":          original,
+		"upload_mapping":    mapping,
+		"template_params":   templateParams,
+		"mapping_mode":      "template_first",
+		"normalized_phone":  phone,
+		"fallback_customer": name != "" && strings.TrimSpace(mappedValue(original, mapping.Name)) == "",
+	}
+	if b, err := json.Marshal(raw); err == nil {
+		rec.RawRow = b
+	}
+
+	rec.IsValid = len(errs) == 0
+	rec.ValidationErrors = errs
+	return rec, errs
+}
+
+func mappedValue(row map[string]string, column string) string {
+	column = strings.TrimSpace(column)
+	if column == "" {
+		return ""
+	}
+	if v, ok := row[column]; ok {
+		return v
+	}
+	want := strings.ToLower(column)
+	for k, v := range row {
+		if strings.ToLower(strings.TrimSpace(k)) == want {
+			return v
+		}
+	}
+	return ""
+}
+
+func NormalizeWhatsAppNumber(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	out := b.String()
+	for len(out) > 10 && strings.HasPrefix(out, "0") {
+		out = out[1:]
+	}
+	if len(out) == 10 {
+		out = "91" + out
+	}
+	return out
 }
 
 func isValidE164ish(s string) bool {

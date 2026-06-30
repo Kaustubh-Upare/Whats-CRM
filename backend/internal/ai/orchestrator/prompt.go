@@ -8,14 +8,22 @@ package orchestrator
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/whatsyitc/backend/internal/ai/retrieval"
 	"github.com/whatsyitc/backend/internal/llm"
 )
 
+type aiUserPromptContext struct {
+	Name        string
+	Phone       string
+	Source      string
+	ExtraFields map[string]string
+}
+
 // BuildSystemPrompt composes the master system prompt for one inbound turn.
-func BuildSystemPrompt(cfg agentConfigRow, history []llm.Message, chunks []retrieval.RetrievedChunk, conversationID int64, phone string) string {
+func BuildSystemPrompt(cfg agentConfigRow, history []llm.Message, chunks []retrieval.RetrievedChunk, conversationID int64, phone string, userCtx ...aiUserPromptContext) string {
 	var b strings.Builder
 
 	name := strings.TrimSpace(cfg.Name)
@@ -36,6 +44,9 @@ func BuildSystemPrompt(cfg agentConfigRow, history []llm.Message, chunks []retri
 		b.WriteString("\nAdditional business instructions:\n")
 		b.WriteString(saved)
 		b.WriteString("\n")
+	}
+	if block := formatAIUserPromptContext(userCtx...); block != "" {
+		b.WriteString(block)
 	}
 
 	b.WriteString(`
@@ -80,4 +91,82 @@ Available tools:
 		fmt.Fprintf(&b, "Known WhatsApp phone for this customer: %s. Use this value for capture_lead.phone; never ask the customer for it.\n", phone)
 	}
 	return b.String()
+}
+
+func formatAIUserPromptContext(userCtx ...aiUserPromptContext) string {
+	if len(userCtx) == 0 {
+		return ""
+	}
+	ctx := userCtx[0]
+	var b strings.Builder
+	name := strings.TrimSpace(ctx.Name)
+	phone := strings.TrimSpace(ctx.Phone)
+	extras := cleanedPromptExtras(ctx.ExtraFields, 12)
+	if name == "" && phone == "" && len(extras) == 0 {
+		return ""
+	}
+
+	b.WriteString("\nKnown customer profile from AI Users:\n")
+	if name != "" {
+		fmt.Fprintf(&b, "- Name: %s\n", singleLine(name, 120))
+	}
+	if phone != "" {
+		fmt.Fprintf(&b, "- Phone: %s\n", singleLine(phone, 40))
+	}
+	if source := strings.TrimSpace(ctx.Source); source != "" {
+		fmt.Fprintf(&b, "- Profile source: %s\n", singleLine(source, 40))
+	}
+	if len(extras) > 0 {
+		b.WriteString("- Extra context:\n")
+		for _, item := range extras {
+			fmt.Fprintf(&b, "  - %s: %s\n", item.key, item.value)
+		}
+	}
+	b.WriteString("Use this profile for personalization and customer attributes. Product, price, policy, stock, and delivery facts still require the current Knowledge base block.\n")
+	return b.String()
+}
+
+type promptExtra struct {
+	key   string
+	value string
+}
+
+func cleanedPromptExtras(fields map[string]string, max int) []promptExtra {
+	if len(fields) == 0 || max <= 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		if strings.TrimSpace(k) != "" && strings.TrimSpace(fields[k]) != "" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	out := make([]promptExtra, 0, minInt(len(keys), max))
+	for _, k := range keys {
+		if len(out) >= max {
+			break
+		}
+		out = append(out, promptExtra{
+			key:   singleLine(k, 80),
+			value: singleLine(fields[k], 240),
+		})
+	}
+	return out
+}
+
+func singleLine(s string, max int) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	if max > 0 && len([]rune(s)) > max {
+		r := []rune(s)
+		s = strings.TrimSpace(string(r[:max])) + "..."
+	}
+	return s
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

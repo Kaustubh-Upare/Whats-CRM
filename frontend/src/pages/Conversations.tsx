@@ -4,7 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   MessagesSquare, Search, Send, ChevronLeft, ChevronRight, Hand, Bot,
-  CheckCircle2, AlertTriangle, Mic, User as UserIcon, Wrench, RefreshCw,
+  CheckCircle2, AlertTriangle, Mic, User as UserIcon, RefreshCw,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
@@ -252,6 +252,9 @@ function ConversationDetail({ id }: { id: number }) {
   })
 
   const isHandedOff = conv.data?.status === 'handed_off'
+  const visibleMessages = (messages.data || [])
+    .filter(isCustomerVisibleMessage)
+    .map((msg) => ({ ...msg, content: cleanVisibleConversationText(msg.content) }))
 
   return (
     <Card className="!p-0 overflow-hidden flex flex-col min-h-[620px]" hover={false}>
@@ -291,8 +294,8 @@ function ConversationDetail({ id }: { id: number }) {
       <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50/40 dark:bg-white/[0.02] min-h-[360px] max-h-[calc(100vh-360px)]">
         {messages.isLoading ? <Spinner /> :
          messages.isError ? <ErrorBox msg={(messages.error as any)?.message || 'Failed'} /> :
-         (messages.data || []).length === 0 ? <Empty>No messages yet.</Empty> :
-         (messages.data || []).map((m) => (
+         visibleMessages.length === 0 ? <Empty>No messages yet.</Empty> :
+         visibleMessages.map((m) => (
            <MessageBubble key={m.id} m={m} />
          ))}
       </div>
@@ -321,10 +324,49 @@ function ConversationDetail({ id }: { id: number }) {
 // Message bubble
 // ---------------------------------------------------------------------------
 
+const INTERNAL_TEXT_MARKERS = [
+  '\u003c\uff5cDSML\uff5cfunction_calls',
+  '\u003c\uff5cfunction_calls',
+  '\u003c\uff5ctool_calls',
+  '<｜DSML｜function_calls',
+  '<|DSML|function_calls',
+  '<｜function_calls',
+  '<function_calls',
+  '<｜tool_calls',
+  '<tool_calls',
+  '<|tool_call',
+  '<tool_call',
+]
+
+function cleanVisibleConversationText(value?: string | null): string {
+  let clean = (value || '').trim()
+  if (!clean) return ''
+
+  for (const marker of INTERNAL_TEXT_MARKERS) {
+    const idx = clean.indexOf(marker)
+    if (idx >= 0) clean = clean.slice(0, idx).trim()
+  }
+
+  clean = clean
+    .split('<customer_reply>').join('')
+    .split('</customer_reply>').join('')
+    .split('<human_review_json>').join('')
+    .split('</human_review_json>').join('')
+    .trim()
+
+  return clean
+}
+
+function isCustomerVisibleMessage(m: AIConversationMessage): boolean {
+  if (m.role === 'tool' || m.role === 'system') return false
+  if (m.role === 'assistant' && !cleanVisibleConversationText(m.content)) return false
+  return true
+}
+
 function MessageBubble({ m }: { m: AIConversationMessage }) {
   const [showMeta, setShowMeta] = useState(false)
   const isUser = m.role === 'user'
-  const isTool = m.role === 'tool'
+  const isTool = false
   const isHuman = m.role === 'human'
   const isAssistant = m.role === 'assistant'
   const sendFailed = (isHuman || isAssistant) && m.send_status === 'failed'
@@ -332,8 +374,8 @@ function MessageBubble({ m }: { m: AIConversationMessage }) {
 
   // Chat-app convention: incoming on the LEFT, outgoing on the RIGHT.
   // Tool messages are debug metadata — render small, left-aligned, dimmed.
-  const isIncoming = isUser || isTool
-  const Icon = isUser ? UserIcon : isTool ? Wrench : isHuman ? Hand : Bot
+  const isIncoming = isUser
+  const Icon = isUser ? UserIcon : isHuman ? Hand : Bot
   const tone = isUser
     // Incoming user message — neutral slate bubble on the LEFT.
     ? 'bg-white dark:bg-white/[0.05] border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100'

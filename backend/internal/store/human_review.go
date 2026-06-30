@@ -68,8 +68,13 @@ func (s *Store) RefreshAIHumanReviewQueue(ctx context.Context, adminUserID int64
 			if err := s.upsertAIHumanReviewCandidate(ctx, row, cand); err != nil {
 				return changed, err
 			}
+			if err := s.upsertAIWorkflowStateForRow(ctx, row, &cand, nil, "human_review_rules"); err != nil {
+				return changed, err
+			}
 			changed++
 		} else if err := s.resolveAIHumanReviewByRecipient(ctx, adminUserID, row.RecipientID); err != nil {
+			return changed, err
+		} else if err := s.upsertAIWorkflowStateForRow(ctx, row, nil, nil, "human_review_rules"); err != nil {
 			return changed, err
 		}
 	}
@@ -93,8 +98,13 @@ func (s *Store) RefreshAIHumanReviewForPhone(ctx context.Context, adminUserID in
 			if err := s.upsertAIHumanReviewCandidate(ctx, row, cand); err != nil {
 				return changed, err
 			}
+			if err := s.upsertAIWorkflowStateForRow(ctx, row, &cand, nil, "phone_rules"); err != nil {
+				return changed, err
+			}
 			changed++
 		} else if err := s.resolveAIHumanReviewByRecipient(ctx, adminUserID, row.RecipientID); err != nil {
+			return changed, err
+		} else if err := s.upsertAIWorkflowStateForRow(ctx, row, nil, nil, "phone_rules"); err != nil {
 			return changed, err
 		}
 	}
@@ -121,10 +131,16 @@ func (s *Store) SaveAIHumanReviewSignalForPhone(ctx context.Context, adminUserID
 			if err := s.upsertAIHumanReviewAISignal(ctx, row, signal); err != nil {
 				return changed, err
 			}
+			if err := s.upsertAIWorkflowStateForRow(ctx, row, nil, &signal, "llm_inline"); err != nil {
+				return changed, err
+			}
 			changed++
 			continue
 		}
 		if err := s.resolveAIHumanReviewByRecipientFromAISignal(ctx, adminUserID, row.RecipientID); err != nil {
+			return changed, err
+		}
+		if err := s.upsertAIWorkflowStateForRow(ctx, row, nil, &signal, "llm_inline"); err != nil {
 			return changed, err
 		}
 		changed++
@@ -950,7 +966,20 @@ func normalizeAIHumanReviewSignal(signal models.AIHumanReviewSignal) models.AIHu
 	if signal.Source == "" {
 		signal.Source = "llm_inline"
 	}
+	signal.ReasonCode = normalizeReviewCode(signal.ReasonCode)
+	if shouldDemoteNoisyAIReview(signal) {
+		signal.RequiresReview = false
+		signal.Labels = normalizeReviewLabels(append(signal.Labels, signal.ReasonCode, signal.Severity, "quiet_gate"))
+		if signal.ReasonLabel == "" {
+			signal.ReasonLabel = defaultReviewLabel(signal.ReasonCode)
+		}
+		if signal.NextAction == "" {
+			signal.NextAction = "Let AI continue; no human action needed unless the buyer asks for a person or the answer becomes uncertain."
+		}
+		return signal
+	}
 	if !signal.RequiresReview {
+		signal.Labels = normalizeReviewLabels(append(signal.Labels, signal.ReasonCode, signal.Severity))
 		return signal
 	}
 	signal.Severity = normalizeReviewSeverity(signal.Severity)
@@ -960,7 +989,6 @@ func normalizeAIHumanReviewSignal(signal models.AIHumanReviewSignal) models.AIHu
 	if signal.PriorityScore > 100 {
 		signal.PriorityScore = 100
 	}
-	signal.ReasonCode = normalizeReviewCode(signal.ReasonCode)
 	if signal.ReasonCode == "" || signal.ReasonCode == "none" {
 		signal.ReasonCode = "ai_review"
 	}
@@ -978,6 +1006,36 @@ func normalizeAIHumanReviewSignal(signal models.AIHumanReviewSignal) models.AIHu
 	}
 	signal.Labels = normalizeReviewLabels(append(signal.Labels, signal.ReasonCode, signal.Severity))
 	return signal
+}
+
+func shouldDemoteNoisyAIReview(signal models.AIHumanReviewSignal) bool {
+	if !signal.RequiresReview {
+		return false
+	}
+	code := normalizeReviewCode(signal.ReasonCode)
+	if code == "" {
+		return false
+	}
+	if normalizeReviewSeverity(signal.Severity) == "critical" {
+		return false
+	}
+	labels := strings.ToLower(strings.Join(signal.Labels, " "))
+	detail := strings.ToLower(strings.Join([]string{
+		signal.ReasonDetail,
+		signal.SuggestedAction,
+		signal.Summary,
+		signal.NextAction,
+		labels,
+	}, " "))
+	if containsAny(detail, "human_needed", "human requested", "asked for human", "complaint", "refund", "payment issue", "delivery issue", "send failed", "low confidence", "cannot answer", "not confident") {
+		return false
+	}
+	switch code {
+	case "hot_lead", "price_question", "meeting_request", "product_confusion":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeReviewSeverity(value string) string {

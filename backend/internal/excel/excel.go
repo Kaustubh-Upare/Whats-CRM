@@ -94,4 +94,20 @@ func (s *Sheet) ToMap(row []string) map[string]string {
 	return m
 }
 
+// ToOriginalMap converts a row to a map keyed by the exact header text. This
+// is useful for upload mapping UIs where the operator sees the original column
+// names from their spreadsheet.
+func (s *Sheet) ToOriginalMap(row []string) map[string]string {
+	m := make(map[string]string, len(s.Headers))
+	for i, h := range s.Headers {
+		key := strings.TrimSpace(h)
+		if i < len(row) {
+			m[key] = row[i]
+		} else {
+			m[key] = ""
+		}
+	}
+	return m
+}
+
 var _ = io.EOF // keep io import in case we add streaming later

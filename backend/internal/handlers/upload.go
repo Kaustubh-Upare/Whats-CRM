@@ -149,9 +149,16 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "parse file: "+err.Error())
 		return
 	}
-	if err := excel.CheckHeaders(sheet.Headers); err != nil {
+	mapping, hasMapping, err := parseUploadMapping(r)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if !hasMapping {
+		if err := excel.CheckHeaders(sheet.Headers); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	// process rows
@@ -165,8 +172,13 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 
 	for i, row := range sheet.Rows {
 		total++
-		m := sheet.ToMap(row)
-		rec, _ := excel.ParseRow(i+1, m)
+		var rec *models.BillingRecord
+		if hasMapping {
+			rec, _ = excel.ParseMappedRow(i+1, sheet.ToOriginalMap(row), mapping)
+		} else {
+			m := sheet.ToMap(row)
+			rec, _ = excel.ParseRow(i+1, m)
+		}
 		rec.BatchID = id
 		owner := uid
 		rec.AdminUserID = &owner
@@ -234,7 +246,7 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 	audit.Log(ctx, s.Store.DB, audit.Entry{
 		ActorID: &uid, ActorEmail: &email,
 		Action: "batch.uploaded", EntityType: strPtr("batch"), EntityID: &id,
-		Metadata:  map[string]any{"total": total, "valid": valid, "invalid": invalid, "duplicates": duplicates, "optouts": optouts, "file": header.Filename},
+		Metadata:  map[string]any{"total": total, "valid": valid, "invalid": invalid, "duplicates": duplicates, "optouts": optouts, "file": header.Filename, "mapped": hasMapping},
 		IPAddress: &ip, UserAgent: &ua,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -244,6 +256,80 @@ func (s *Server) UploadBatch(w http.ResponseWriter, r *http.Request) {
 		"errors":    invalidRecs,
 		"file_path": dst,
 	})
+}
+
+func (s *Server) InspectUpload(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(s.Cfg.MaxUploadBytes); err != nil {
+		writeErr(w, http.StatusBadRequest, "file too large or bad multipart: "+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "missing 'file' field")
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext != ".xlsx" && ext != ".csv" {
+		writeErr(w, http.StatusBadRequest, "only .xlsx or .csv accepted")
+		return
+	}
+	if err := os.MkdirAll(s.Cfg.UploadDir, 0o755); err != nil {
+		writeErr(w, http.StatusInternalServerError, "mkdir: "+err.Error())
+		return
+	}
+	rnd := randHex(8)
+	tmpPath := filepath.Join(s.Cfg.UploadDir, fmt.Sprintf("inspect_%d_%s_%s", time.Now().Unix(), rnd, sanitize(header.Filename)))
+	out, err := os.Create(tmpPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "save: "+err.Error())
+		return
+	}
+	_, err = io.Copy(out, file)
+	out.Close()
+	defer os.Remove(tmpPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "save copy: "+err.Error())
+		return
+	}
+
+	sheet, err := excel.Read(tmpPath)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "parse file: "+err.Error())
+		return
+	}
+	samples := []map[string]string{}
+	for i, row := range sheet.Rows {
+		if i >= 5 {
+			break
+		}
+		samples = append(samples, sheet.ToOriginalMap(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"headers":     sheet.Headers,
+		"sample_rows": samples,
+		"total_rows":  len(sheet.Rows),
+		"file_name":   header.Filename,
+	})
+}
+
+func parseUploadMapping(r *http.Request) (excel.UploadMapping, bool, error) {
+	raw := strings.TrimSpace(r.FormValue("mapping"))
+	if raw == "" {
+		return excel.UploadMapping{}, false, nil
+	}
+	var mapping excel.UploadMapping
+	if err := json.Unmarshal([]byte(raw), &mapping); err != nil {
+		return excel.UploadMapping{}, false, fmt.Errorf("mapping must be valid JSON")
+	}
+	if strings.TrimSpace(mapping.Phone) == "" {
+		return excel.UploadMapping{}, false, fmt.Errorf("phone mapping is required")
+	}
+	if mapping.TemplateVars == nil {
+		mapping.TemplateVars = map[string]string{}
+	}
+	return mapping, true, nil
 }
 
 func (s *Server) ApproveBatch(w http.ResponseWriter, r *http.Request) {
@@ -478,10 +564,7 @@ func (s *Server) PreviewBatchMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Same substitution the worker uses (handlers/helpers.go buildTemplateParams)
 	params := buildTemplateParams(chosen, tpl.Body)
-	body := tpl.Body
-	for i, p := range params {
-		body = strings.ReplaceAll(body, fmt.Sprintf("{{%d}}", i+1), p)
-	}
+	body := renderBodyWithParams(tpl.Body, params)
 
 	phone := ""
 	if chosen.WhatsappNumber != nil {

@@ -1,10 +1,11 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import {
   Save, RefreshCcw, Trash2, ShieldCheck, AlertTriangle, RotateCcw,
-  History, CheckCircle2, ChevronRight, BookOpen,
+  History, CheckCircle2, ChevronRight, BookOpen, Phone, KeyRound, Clock3,
+  Bot, Sparkles,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Card, CardHeader, ErrorBox, PageHeader, Spinner, GlassCard } from '@/components/ui'
@@ -13,7 +14,8 @@ import {
   getWhatsappSettings, putWhatsappSettings, testWhatsappSettings,
   deleteWhatsappSettings, restoreWhatsappSettings, getCredentialsHistory,
 } from '@/lib/settings'
-import type { CredentialsHistoryEntry } from '@/lib/types'
+import { aiKeys, listAIAgents } from '@/lib/ai'
+import type { CredentialsHistoryEntry, WhatsappSettings } from '@/lib/types'
 import { fmtRelative } from '@/lib/format'
 
 export default function Credentials() {
@@ -43,6 +45,12 @@ function WhatsappCredentialsCard() {
     queryKey: ['settings', 'whatsapp', 'history'],
     queryFn: () => getCredentialsHistory(20),
     refetchOnWindowFocus: false,
+  })
+  const agents = useQuery({
+    queryKey: aiKeys.agents(),
+    queryFn: listAIAgents,
+    enabled: !!settings.data?.configured && !settings.data?.is_removed,
+    staleTime: 30_000,
   })
 
   const [phone, setPhone] = useState('')
@@ -213,6 +221,18 @@ function WhatsappCredentialsCard() {
               You haven't added your WhatsApp Business credentials yet. Without them, the app can't send any messages on your behalf. Fill in the form below and click <strong>Save</strong>.
             </div>
           ) : null}
+
+        {!settings.isLoading && !settings.isError && (
+          <CurrentCredentialsPanel cfg={cfg} />
+        )}
+
+        {!settings.isLoading && !settings.isError && isConfigured && !isRemoved && (
+          <AgentSetupNudge
+            loading={agents.isLoading}
+            total={agents.data?.length ?? 0}
+            enabledCount={(agents.data || []).filter((a) => a.enabled).length}
+          />
+        )}
 
         <Field k="Phone Number ID" v={
           <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)}
@@ -401,6 +421,223 @@ function WhatsappCredentialsCard() {
       </div>
     </Card>
   )
+}
+
+function AgentSetupNudge({
+  loading,
+  total,
+  enabledCount,
+}: {
+  loading: boolean
+  total: number
+  enabledCount: number
+}) {
+  const ready = enabledCount > 0
+  return (
+    <GlassCard className={`!p-0 overflow-hidden ${ready ? '' : 'ring-1 ring-amber-200 dark:ring-amber-400/25'}`}>
+      <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="p-4 lg:p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className={`grid h-10 w-10 place-items-center rounded-xl ${
+              ready
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'
+            }`}>
+              {ready ? <Sparkles className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Next step
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <div className="font-semibold text-slate-950 dark:text-white">
+                  {ready ? 'AI agent is ready' : 'Set up an AI agent before auto-replies'}
+                </div>
+                <PillPop className={ready ? 'pill-green' : 'pill-amber'}>
+                  {loading ? 'checking' : ready ? `${enabledCount} enabled` : total > 0 ? 'disabled' : 'required'}
+                </PillPop>
+              </div>
+            </div>
+          </div>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+            {ready
+              ? 'Inbound WhatsApp messages can be handled by an enabled agent. Disable every agent if you want messages to be stored without any LLM request or automatic reply.'
+              : 'Credentials receive WhatsApp messages, but WhatsyITC will not call the LLM or reply until you create and enable an agent.'}
+          </p>
+        </div>
+        <div className="flex items-center border-t border-[var(--border)] p-4 lg:border-l lg:border-t-0">
+          <Link
+            to="/admin/ai/agent"
+            className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+              ready
+                ? 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/[0.07]'
+                : 'bg-emerald-600 text-white shadow-[0_8px_24px_rgba(16,185,129,0.25)] hover:bg-emerald-500'
+            }`}
+          >
+            {ready ? 'Manage agent' : 'Setup agent'}
+            <ChevronRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </div>
+    </GlassCard>
+  )
+}
+
+function CurrentCredentialsPanel({ cfg }: { cfg?: WhatsappSettings }) {
+  const state = getCredentialState(cfg)
+  const phone = cfg?.is_removed
+    ? cfg.last_known_phone_number_id
+    : cfg?.phone_number_id
+  const waba = cfg?.is_removed
+    ? cfg.last_known_waba_id
+    : cfg?.waba_id
+  const apiVersion = cfg?.is_removed
+    ? cfg.last_known_api_version
+    : cfg?.api_version
+  const lastTime = cfg?.is_removed
+    ? cfg.removed_at
+    : cfg?.verified_at || cfg?.updated_at || cfg?.created_at
+
+  return (
+    <GlassCard className="!p-0">
+      <div className="grid gap-0 lg:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)]">
+        <div className="p-4 lg:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Current WhatsApp sender
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div className="text-lg font-semibold text-slate-950 dark:text-white">
+                  {state.title}
+                </div>
+                <PillPop className={state.pillClass}>{state.pill}</PillPop>
+              </div>
+            </div>
+            <div className={`grid h-11 w-11 place-items-center rounded-xl ${state.iconClass}`}>
+              <state.icon className="h-5 w-5" />
+            </div>
+          </div>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+            {state.description}
+          </p>
+          {cfg?.last_error && !cfg.is_removed && (
+            <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+              <div className="font-semibold">Last connection test failed</div>
+              <div className="mt-1 line-clamp-2 whitespace-pre-wrap">{cfg.last_error}</div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-[var(--border)] p-4 lg:border-l lg:border-t-0 lg:p-5">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+            <SafeCredentialLine icon={Phone} label="Phone Number ID" value={phone || 'Not set'} strong={!!phone} />
+            <SafeCredentialLine icon={KeyRound} label="WABA ID" value={waba || 'Optional / not set'} />
+            <SafeCredentialLine icon={ShieldCheck} label="API version" value={apiVersion || 'v25.0'} />
+            <SafeCredentialLine
+              icon={Clock3}
+              label={cfg?.is_removed ? 'Removed' : cfg?.is_verified ? 'Verified' : 'Last updated'}
+              value={lastTime ? fmtRelative(lastTime) : 'No activity yet'}
+            />
+          </div>
+          <div className="mt-3 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">
+            <div className="flex items-center gap-2 font-semibold text-slate-800 dark:text-white">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+              Secrets are never shown here
+            </div>
+            <div className="mt-1">
+              Access token and verify token are stored encrypted. Type new values only when you want to rotate them.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Link
+        to="/admin/credentials/setup-guide"
+        className="flex items-center justify-between border-t border-[var(--border)] px-4 py-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-white/[0.04]"
+      >
+        <span className="inline-flex items-center gap-2">
+          <BookOpen className="h-3.5 w-3.5" />
+          Need Meta setup steps or webhook details?
+        </span>
+        <ChevronRight className="h-4 w-4" />
+      </Link>
+    </GlassCard>
+  )
+}
+
+function SafeCredentialLine({
+  icon: Icon,
+  label,
+  value,
+  strong = false,
+}: {
+  icon: ComponentType<{ className?: string }>
+  label: string
+  value: string
+  strong?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</div>
+        <div className={`mt-0.5 truncate text-xs ${strong ? 'font-mono font-semibold text-slate-950 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>
+          {value}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function getCredentialState(cfg?: WhatsappSettings): {
+  title: string
+  pill: string
+  pillClass: string
+  description: string
+  icon: ComponentType<{ className?: string }>
+  iconClass: string
+} {
+  if (cfg?.is_removed) {
+    return {
+      title: 'No active sender',
+      pill: 'Removed',
+      pillClass: 'pill-slate',
+      description: 'Previous credentials are safely kept on file, but they are not active. Restore them or save new values before sending messages.',
+      icon: History,
+      iconClass: 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300',
+    }
+  }
+  if (cfg?.configured && cfg.is_verified) {
+    return {
+      title: 'Active and verified',
+      pill: 'Live',
+      pillClass: 'pill-green',
+      description: 'This is the WhatsApp sender currently used for bulk messages, AI replies, follow-ups, and manual conversation sends.',
+      icon: ShieldCheck,
+      iconClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+    }
+  }
+  if (cfg?.configured) {
+    return {
+      title: 'Stored, needs test',
+      pill: 'Needs test',
+      pillClass: 'pill-amber',
+      description: 'Credentials are saved, but the connection has not been verified yet. Run Test connection before depending on outbound sends.',
+      icon: AlertTriangle,
+      iconClass: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+    }
+  }
+  return {
+    title: 'Not connected',
+    pill: 'Inactive',
+    pillClass: 'pill-red',
+    description: 'No WhatsApp sender is active for this workspace. Add your Meta phone number ID, access token, and verify token to enable sending.',
+    icon: AlertTriangle,
+    iconClass: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
+  }
 }
 
 function Field({ k, v, sub }: { k: ReactNode; v: any; sub?: string }) {

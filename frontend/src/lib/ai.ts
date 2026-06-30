@@ -3,7 +3,8 @@
 import { api } from '@/lib/api'
 import type {
   AddKBPayload, AIAgentConfig, AIAgentKnowledgeScope, AIConversation, AIConversationMessage,
-  AIConversationsList, AIStatus, EditKBPayload,
+  AIConversationsList, AIStatus, AIUser, AIUserFollowupResult, AIUsersImportResult, AIUsersInspectResult, AIUsersList,
+  BatchFollowupConfig, EditKBPayload,
   IngestURLPayload, IngestURLResult, KBChunk, KBListResponse,
   PutAIAgentKnowledgePayload, PutAIAgentPayload, SearchKBRequest, SearchKBResult, SendHumanMessageResult,
   SendHumanMessage, TestAgentRequest, TestAgentResult,
@@ -14,6 +15,58 @@ import type {
 export async function getAIStatus(): Promise<AIStatus> {
   const { data } = await api.get('/api/ai/status')
   return data as AIStatus
+}
+
+// --- AI users ---
+
+export interface ListAIUsersParams {
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export async function listAIUsers(params: ListAIUsersParams = {}): Promise<AIUsersList> {
+  const { data } = await api.get('/api/ai/users', { params })
+  return data as AIUsersList
+}
+
+export async function createAIUser(payload: {
+  name: string
+  phone: string
+  extra_fields?: Record<string, string>
+}): Promise<AIUser> {
+  const { data } = await api.post('/api/ai/users', payload)
+  return data as AIUser
+}
+
+export async function startAIUserFollowup(
+  retailerId: number,
+  config: BatchFollowupConfig,
+  opts: { overrideExisting?: boolean } = {},
+): Promise<AIUserFollowupResult> {
+  const { data } = await api.post(`/api/ai/users/${retailerId}/followup/start`, {
+    ...config,
+    override_existing: opts.overrideExisting ?? false,
+  })
+  return data as AIUserFollowupResult
+}
+
+export async function inspectAIUsersUpload(file: File): Promise<AIUsersInspectResult> {
+  const form = new FormData()
+  form.append('file', file)
+  const { data } = await api.post('/api/ai/users/inspect-upload', form)
+  return data as AIUsersInspectResult
+}
+
+export async function importAIUsers(
+  file: File,
+  mapping: { name: string; phone: string; extra_columns: string[] },
+): Promise<AIUsersImportResult> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('mapping', JSON.stringify(mapping))
+  const { data } = await api.post('/api/ai/users/import', form)
+  return data as AIUsersImportResult
 }
 
 // --- Agent config ---
@@ -238,6 +291,7 @@ export async function sendHumanMessage(id: number, content: string): Promise<Sen
 
 export const aiKeys = {
   status:       () => ['ai', 'status'] as const,
+  users:        (params: ListAIUsersParams) => ['ai', 'users', params] as const,
   agent:        () => ['ai', 'agent'] as const,            // legacy alias
   agents:       () => ['ai', 'agents'] as const,
   agentItem:    (id: number) => ['ai', 'agents', id] as const,

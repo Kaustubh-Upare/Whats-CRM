@@ -21,11 +21,15 @@ import {
   humanizeAIFollowupStatus,
 } from '@/components/AIFollowupParts'
 import {
+  AIDecisionLogList, AIWorkflowCard, AIWorkflowSummaryCards,
+} from '@/components/AIWorkflowParts'
+import {
   batchAIKeys, clearBatchAINextMessage, excludeBatchAIRecipient, generateBatchAINextMessage, getBatchAgent,
-  getBatchAIFollowup, getBatchAIRecipient, includeBatchAIRecipient, listBatchAIRecipientAudit,
+  generateBatchAIRecipientWorkflowBrief, getBatchAIFollowup, getBatchAIRecipient, getBatchAIRecipientWorkflow, includeBatchAIRecipient, listAIWorkflows,
+  listBatchAIRecipientAudit,
   pauseBatchAIRecipient, preflightBatchAIFollowupDuplicates, putBatchAIFollowup,
   resumeBatchAIRecipient,
-  saveBatchAINextMessage, sendNextBatchAIStep, setBatchAgent, setBatchAIRecipientMode,
+  saveBatchAINextMessage, sendNextBatchAIStep, setBatchAgent,
   startBatchAIFollowupSequence,
   type SaveNextMessageBody, type UpdatePlanBody, updateBatchAIRecipientPlan,
 } from '@/lib/batchAI'
@@ -37,7 +41,7 @@ import type {
   AIAgentConfig, AIConversationMessage, AuditLog, BatchAIFollowup, BatchAIFollowupDuplicate,
   BatchAIRecipient, BatchAIRecipientDetail, BatchFollowupConfig, EffectiveAIAgent,
   FollowupBehavior, FollowupEnrollmentRow, FollowupTone, RetrievedChunk,
-  StartBatchFollowupOpts, UploadBatch,
+  StartBatchFollowupOpts, UploadBatch, AIWorkflowState,
 } from '@/lib/types'
 
 type StatusFilter = 'all' | 'pending' | 'active' | 'failed' | 'handed_off' | 'excluded' | 'opted_out' | 'disabled'
@@ -187,6 +191,33 @@ export default function BatchAIFollowup() {
     retry: false,
   })
 
+  const workflowListQ = useQuery({
+    queryKey: batchAIKeys.workflows({ batch_id: batchID, limit: 200 }),
+    queryFn: () => listAIWorkflows({ batch_id: batchID, limit: 200 }),
+    enabled: batchID > 0,
+    refetchInterval: 20_000,
+    retry: false,
+  })
+
+  const selectedWorkflowQ = useQuery({
+    queryKey: selectedRecipientId ? batchAIKeys.workflow(selectedRecipientId) : ['batch-ai-recipient', 'none', 'workflow'],
+    queryFn: () => getBatchAIRecipientWorkflow(selectedRecipientId!),
+    enabled: !!selectedRecipientId,
+    refetchInterval: 5_000,
+    retry: false,
+  })
+
+  const workflowBriefMut = useMutation({
+    mutationFn: (recipientId: number) => generateBatchAIRecipientWorkflowBrief(recipientId, { history_limit: 20 }),
+    onSuccess: (state, recipientId) => {
+      toast.success('AI workflow brief updated')
+      qc.setQueryData(batchAIKeys.workflow(recipientId), state)
+      qc.invalidateQueries({ queryKey: batchAIKeys.decisions(recipientId, 20) })
+      qc.invalidateQueries({ queryKey: ['ai', 'workflows'] })
+    },
+    onError: (e: any) => toast.error(apiError(e, 'Failed to generate AI workflow brief')),
+  })
+
   const selected = selectedQ.data
   const selectedMessages = messagesQ.data ?? []
   const selectedAudit = auditQ.data ?? []
@@ -205,9 +236,11 @@ export default function BatchAIFollowup() {
   function invalidateBatch(recipientId?: number | null) {
     qc.invalidateQueries({ queryKey: batchAIKeys.followup(batchID) })
     qc.invalidateQueries({ queryKey: ['ai', 'followups'] })
+    qc.invalidateQueries({ queryKey: ['ai', 'workflows'] })
     if (recipientId) {
       qc.invalidateQueries({ queryKey: batchAIKeys.recipient(recipientId) })
       qc.invalidateQueries({ queryKey: batchAIKeys.audit(recipientId) })
+      qc.invalidateQueries({ queryKey: batchAIKeys.workflow(recipientId) })
     }
     if (conversationID) {
       qc.invalidateQueries({ queryKey: aiKeys.messages(conversationID) })
@@ -324,15 +357,6 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
     onError: (e: any) => toast.error(apiError(e, 'Failed to update follow-up')),
   })
 
-  const modeMut = useMutation({
-    mutationFn: ({ recipientId, mode }: { recipientId: number; mode: string }) => setBatchAIRecipientMode(recipientId, mode),
-    onSuccess: (_, vars) => {
-      toast.success('AI mode updated')
-      invalidateBatch(vars.recipientId)
-    },
-    onError: (e: any) => toast.error(apiError(e, 'Failed to update AI mode')),
-  })
-
   const planMut = useMutation({
     mutationFn: async ({
       recipientId, value,
@@ -408,6 +432,8 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
                 selectedQ.refetch()
                 messagesQ.refetch()
                 auditQ.refetch()
+                workflowListQ.refetch()
+                selectedWorkflowQ.refetch()
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-[var(--input-bg)] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
             >
@@ -450,6 +476,12 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
       {followupQ.isError && (
         <div className="mb-5">
           <ErrorBox msg={apiError(followupQ.error, 'Failed to load AI follow-up recipients')} />
+        </div>
+      )}
+
+      {enabled && (
+        <div className="mb-4">
+          <AIWorkflowSummaryCards stats={workflowListQ.data?.stats} />
         </div>
       )}
 
@@ -636,6 +668,10 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
         <RecipientPanel
           detail={selected}
           loading={selectedQ.isLoading || selectedQ.isFetching}
+          workflow={selectedWorkflowQ.data}
+          onGenerateWorkflowBrief={(recipientId) => workflowBriefMut.mutate(recipientId)}
+          workflowBriefLoading={workflowBriefMut.isPending}
+          workflowBriefError={(workflowBriefMut.error as any)?.response?.data?.error || (workflowBriefMut.error as any)?.message || ''}
           agent={agentQ.data?.agent ?? undefined}
           knowledge={knowledgeQ.data?.chunks ?? []}
           knowledgeLoading={knowledgeQ.isLoading || knowledgeQ.isFetching}
@@ -646,13 +682,12 @@ function handlePlanSave(cfg: BatchFollowupConfig) {
           auditError={auditQ.isError ? apiError(auditQ.error, 'Failed to load history') : ''}
           timeline={timeline}
           latestError={selectedError}
-          busy={recipientStatusMut.isPending || recipientActionMut.isPending || modeMut.isPending || planMut.isPending}
+          busy={recipientStatusMut.isPending || recipientActionMut.isPending || planMut.isPending}
           onInclude={(recipientId) => recipientStatusMut.mutate({ recipientId, target: 'include' })}
           onExclude={(recipientId) => recipientStatusMut.mutate({ recipientId, target: 'exclude' })}
           onPause={(recipientId) => recipientActionMut.mutate({ recipientId, action: 'pause' })}
           onResume={(recipientId) => recipientActionMut.mutate({ recipientId, action: 'resume' })}
           onSendNext={requestSendNext}
-          onMode={(recipientId, mode) => modeMut.mutate({ recipientId, mode })}
           onEditPlan={() => setEditPlanOpen(true)}
         />
       </div>
@@ -849,12 +884,17 @@ function RecipientRailItem({
 }
 
 function RecipientPanel({
-  detail, loading, agent, knowledge, knowledgeLoading, knowledgeError,
+  detail, loading, workflow, agent, knowledge, knowledgeLoading, knowledgeError,
   messages, messagesError, audit, auditError, timeline, latestError, busy,
-  onInclude, onExclude, onPause, onResume, onSendNext, onMode, onEditPlan,
+  onInclude, onExclude, onPause, onResume, onSendNext, onEditPlan,
+  onGenerateWorkflowBrief, workflowBriefLoading, workflowBriefError,
 }: {
   detail?: BatchAIRecipientDetail
   loading: boolean
+  workflow?: AIWorkflowState
+  onGenerateWorkflowBrief: (recipientId: number) => void
+  workflowBriefLoading: boolean
+  workflowBriefError: string
   agent?: AIAgentConfig
   knowledge: RetrievedChunk[]
   knowledgeLoading: boolean
@@ -871,7 +911,6 @@ function RecipientPanel({
   onPause: (recipientId: number) => void
   onResume: (recipientId: number) => void
   onSendNext: (recipientId: number) => void
-  onMode: (recipientId: number, mode: string) => void
   onEditPlan: () => void
 }) {
   const [timelineOpen, setTimelineOpen] = useState(false)
@@ -1004,6 +1043,25 @@ function RecipientPanel({
             </div>
           )}
 
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-3">
+            <AIWorkflowCard
+              workflow={workflow}
+              onGenerateBrief={() => onGenerateWorkflowBrief(r.id)}
+              briefLoading={workflowBriefLoading}
+              briefError={workflowBriefError}
+            />
+            <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-white">Decision log</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Why the AI moved this phone.</div>
+                </div>
+                <Brain className="h-4 w-4 text-violet-500" />
+              </div>
+              <AIDecisionLogList logs={workflow?.recent_decisions || []} />
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <InfoLine icon={<Route className="w-4 h-4" />} label="Follow-up">
               {f ? (
@@ -1031,50 +1089,12 @@ function RecipientPanel({
             </InfoLine>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-3">
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-white/10 dark:bg-white/[0.03]">
-              <div className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
-                Current objective
-              </div>
-              <div className="mt-2 text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap">
-                {f?.goal?.trim() || `Follow up with ${r.retailer_name || r.whatsapp_number}, answer using knowledge, and move toward a clear next step.`}
-              </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
+              Current objective
             </div>
-
-            <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-white/[0.03]">
-              <div className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">
-                AI mode
-              </div>
-              {canControlPlan && (
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  {[
-                    ['ai_followup', 'AI'],
-                    ['agentic_followup', 'Agentic'],
-                    ['template', 'Template'],
-                  ].map(([mode, label]) => {
-                    const active = (f?.mode || 'ai_followup') === mode
-                    return (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => onMode(r.id, mode)}
-                        disabled={busy || active}
-                        className={`px-2 py-2 rounded-md border text-[12px] font-medium transition-colors
-                                    ${active
-                                      ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                                      : 'border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5'}`}
-                      >
-                        {label}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-              {!canControlPlan && (
-                <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                  Create a plan to choose how this recipient should be handled.
-                </div>
-              )}
+            <div className="mt-2 text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap">
+              {f?.goal?.trim() || `Follow up with ${r.retailer_name || r.whatsapp_number}, answer using knowledge, and move toward a clear next step.`}
             </div>
           </div>
         </div>
@@ -1369,7 +1389,6 @@ function AgentPreviewCard({
         <div className="grid grid-cols-2 gap-3">
           <MiniStat label="Assistant" value={agent?.name || 'AI assistant'} />
           <MiniStat label="State" value={agent?.enabled ? 'Enabled' : 'Disabled'} />
-          <MiniStat label="Model" value={agent?.primary_model || 'Not set'} />
           <MiniStat label="Knowledge" value={loading ? 'Loading...' : `${knowledge.length} match${knowledge.length === 1 ? '' : 'es'}`} />
         </div>
         {error && <ErrorBox msg={error} />}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, Navigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, Navigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { api, setToken } from '@/lib/api'
@@ -37,6 +37,7 @@ function GoogleMark({ className = '' }: { className?: string }) {
 
 export default function Login() {
   const nav = useNavigate()
+  const loc = useLocation()
   const { status } = useAuth()
   const [params] = useSearchParams()
   const [email, setEmail] = useState('')
@@ -48,6 +49,8 @@ export default function Login() {
   // once the cookie is set after a successful login; cleared on logout
   // so the next user sees a neutral sign-in form.
   const [whoami, setWhoami] = useState<AdminUser | null>(null)
+
+  const redirectTo = safeAdminRedirect((loc.state as { from?: string } | null)?.from)
 
   // Pull the server-side Google status once. If `enabled=false` the
   // button is rendered in a disabled state with a tooltip explaining
@@ -77,7 +80,7 @@ export default function Login() {
   // the JWT lives only in the httpOnly cookie, so a localStorage check
   // alone would have stranded the user on /login forever.
   if (status === 'authed') {
-    return <Navigate to="/admin" replace />
+    return <Navigate to={redirectTo} replace />
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -94,7 +97,7 @@ export default function Login() {
       toast.success(ws ? `Welcome to ${ws}` : `Welcome, ${data.user.name}`)
       // Invalidate the cached auth probe so Protected re-checks.
       // (react-query's query invalidation is automatic for ['auth','me', …].)
-      nav('/admin', { replace: true })
+      nav(redirectTo, { replace: true })
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Login failed')
     } finally {
@@ -106,8 +109,8 @@ export default function Login() {
     if (!google?.enabled) return
     // We redirect the whole window so the OAuth state map + callback
     // round-trip cleanly with the server. next=/admin takes the user
-    // back to the admin console after the callback 302s.
-    window.location.href = `/auth/google/start?next=${encodeURIComponent('/admin')}`
+    // back to the originally requested admin page after the callback 302s.
+    window.location.href = `/auth/google/start?next=${encodeURIComponent(redirectTo)}`
   }
 
   return (
@@ -284,4 +287,11 @@ export default function Login() {
       </motion.form>
     </div>
   )
+}
+
+function safeAdminRedirect(from?: string) {
+  if (!from) return '/admin'
+  if (!from.startsWith('/admin')) return '/admin'
+  if (from.startsWith('//')) return '/admin'
+  return from
 }

@@ -12,10 +12,11 @@ import {
   Card, CardHeader, Empty, ErrorBox, PageHeader, PrimaryButton,
   SecondaryButton, Spinner,
 } from '@/components/ui'
+import { AIDecisionLogList, AIWorkflowCard, AIWorkflowStateBadge } from '@/components/AIWorkflowParts'
 import { AIFollowupStatusBadge, humanizeAIFollowupStatus } from '@/components/AIFollowupParts'
 import { aiKeys, getConversationMessages } from '@/lib/ai'
 import {
-  batchAIKeys, excludeBatchAIRecipient, getBatchAIRecipient, includeBatchAIRecipient,
+  batchAIKeys, excludeBatchAIRecipient, getBatchAIRecipient, getBatchAIRecipientWorkflow, includeBatchAIRecipient,
 } from '@/lib/batchAI'
 import { batchDisplayName, fmtDate, fmtRelative } from '@/lib/format'
 import type { AIConversationMessage, BatchAIRecipientDetail } from '@/lib/types'
@@ -49,6 +50,14 @@ export default function FollowupDetail() {
     queryFn: () => getConversationMessages(conversationID!),
     enabled: !!conversationID,
     refetchInterval: 5000,
+  })
+
+  const workflowQ = useQuery({
+    queryKey: validId ? batchAIKeys.workflow(id) : ['batch-ai-recipient', 'bad-id', 'workflow'],
+    queryFn: () => getBatchAIRecipientWorkflow(id),
+    enabled: validId,
+    refetchInterval: 5000,
+    retry: false,
   })
 
   const statusMutation = useMutation({
@@ -148,6 +157,24 @@ export default function FollowupDetail() {
           value={conv ? conv.status : 'No conversation'}
           sub={conv ? `${conv.ai_handled_count || 0} AI, ${conv.human_handled_count || 0} human` : 'No WhatsApp reply yet'}
         />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-5 mb-5">
+        <AIWorkflowCard workflow={workflowQ.data} />
+        <Card hover={false} className="!p-0">
+          <CardHeader
+            title="AI decision log"
+            subtitle="Why the workflow changed and what AI plans next."
+            right={workflowQ.data ? <AIWorkflowStateBadge state={workflowQ.data.state} /> : undefined}
+          />
+          <div className="p-4 max-h-[360px] overflow-y-auto">
+            {workflowQ.isError ? (
+              <ErrorBox msg={apiError(workflowQ.error, 'Failed to load AI decision log')} />
+            ) : (
+              <AIDecisionLogList logs={workflowQ.data?.recent_decisions || []} />
+            )}
+          </div>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_0.85fr] gap-5">

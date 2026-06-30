@@ -258,6 +258,7 @@ func main() {
 	api.HandleFunc("GET /conversations/by-phone/{phone}/messages", srv.GetConversationByPhone)
 
 	api.HandleFunc("GET /batches", srv.ListBatches)
+	api.HandleFunc("POST /batches/inspect-upload", srv.InspectUpload)
 	api.HandleFunc("POST /batches/upload", srv.UploadBatch)
 	api.HandleFunc("GET /batches/{id}", srv.GetBatch)
 	// Inline-editable batch name. PATCH so it can grow other small
@@ -311,6 +312,9 @@ func main() {
 	api.HandleFunc("DELETE /batch-ai-recipients/{id}/next-message", srv.ClearNextFollowupMessage)
 	api.HandleFunc("POST /batch-ai-recipients/{id}/mode", srv.SetFollowupMode)
 	api.HandleFunc("GET /batch-ai-recipients/{id}/audit", srv.RecipientAuditLog)
+	api.HandleFunc("GET /batch-ai-recipients/{id}/workflow", srv.GetBatchAIRecipientWorkflow)
+	api.HandleFunc("POST /batch-ai-recipients/{id}/workflow/ai-brief", srv.GenerateBatchAIRecipientWorkflowBrief)
+	api.HandleFunc("GET /batch-ai-recipients/{id}/decisions", srv.ListBatchAIRecipientDecisions)
 	api.HandleFunc("GET /ai/followups/export", srv.ExportFollowupsCSV)
 
 	api.HandleFunc("GET /templates", srv.ListTemplates)
@@ -332,6 +336,11 @@ func main() {
 
 	// AI assistant admin surface.
 	api.HandleFunc("GET /ai/status", srv.AIStatus)
+	api.HandleFunc("GET /ai/users", srv.ListAIUsers)
+	api.HandleFunc("POST /ai/users", srv.CreateAIUser)
+	api.HandleFunc("POST /ai/users/{id}/followup/start", srv.StartAIUserFollowup)
+	api.HandleFunc("POST /ai/users/inspect-upload", srv.InspectAIUsersUpload)
+	api.HandleFunc("POST /ai/users/import", srv.ImportAIUsers)
 	// Multi-agent CRUD (Phase 8).
 	api.HandleFunc("GET /ai/agents", srv.ListAIAgents)
 	api.HandleFunc("POST /ai/agents", srv.CreateAIAgent)
@@ -368,6 +377,7 @@ func main() {
 	// /admin/ai/followups sidebar page.
 	api.HandleFunc("GET /ai/followups", srv.ListBatchAIFollowups)
 	api.HandleFunc("GET /ai/followups/insights", srv.ListBatchAICRMInsights)
+	api.HandleFunc("GET /ai/workflows", srv.ListAIWorkflows)
 	api.HandleFunc("GET /ai/human-review", srv.ListAIHumanReview)
 	api.HandleFunc("GET /ai/human-review/{id}", srv.GetAIHumanReview)
 	api.HandleFunc("POST /ai/human-review/{id}/resolve", srv.ResolveAIHumanReview)

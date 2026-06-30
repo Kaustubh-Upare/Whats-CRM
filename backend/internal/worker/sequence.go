@@ -379,9 +379,12 @@ func (w *SequenceWorker) processOne(ctx context.Context, l lockedRow) {
 		// 'ai_followup'      → mode='custom' (admin-supplied goal/tone
 		//                      baked into the prompt verbatim).
 		// 'agentic_followup' → mode='agentic' (LLM decides whether
-		//                      to send at all; empty = skip).
+		//                      to send at all; empty = skip). The first
+		//                      touch is forced through custom mode so Smart
+		//                      AI actually starts the conversation instead
+		//                      of logging "first touch due" forever.
 		modeArg := "custom"
-		if l.mode == "agentic_followup" {
+		if l.mode == "agentic_followup" && l.currentStep > 0 {
 			modeArg = "agentic"
 		}
 		// Resolve the enrollment's batch context so the orchestrator can
@@ -398,10 +401,11 @@ func (w *SequenceWorker) processOne(ctx context.Context, l lockedRow) {
 			w.pauseEnrollment(ctx, l, "send_failed", "followup LLM: "+err.Error())
 			return
 		}
-		// In agentic mode, "" is a legitimate "skip this tick".
-		// We just advance the enrollment below without sending.
+		// In agentic mode, "" is a legitimate "skip this tick", but it
+		// must not count as a sent follow-up. Keep the same current_step
+		// and only move next_run_at forward.
 		if l.mode == "agentic_followup" && strings.TrimSpace(body) == "" {
-			w.advanceEnrollmentStep(ctx, l, stepCond)
+			w.rescheduleAgenticSkip(ctx, l, stepCond, leadPhone)
 			w.refreshHumanReviewForPhone(ctx, l.adminID, leadPhone, "agentic_skip")
 			return
 		}
@@ -453,14 +457,14 @@ func (w *SequenceWorker) processOne(ctx context.Context, l lockedRow) {
 	if err := w.persistFollowupConversationMessage(ctx, l, leadPhone, body); err != nil {
 		log.Printf("[seq-worker] persist sent follow-up enrollment=%d: %v", l.id, err)
 	}
+	w.markBatchRecipientFollowupSent(ctx, l, leadPhone, body)
 	w.advanceEnrollmentStep(ctx, l, stepCond)
 	w.refreshHumanReviewForPhone(ctx, l.adminID, leadPhone, "followup_sent")
 }
 
 // advanceEnrollmentStep moves the enrollment forward by one step.
-// Called on a successful send AND on an agentic-mode "skip this
-// tick" decision (where body="" was returned). Both paths want the
-// exact same advance + max_messages + audit behavior.
+// Called on a successful send. Agentic skip uses rescheduleAgenticSkip instead
+// because a skip should not count as a sent message.
 //
 // stepCond is the JSONB condition blob on the current step row;
 // we read max_messages from there.
@@ -540,6 +544,93 @@ func (w *SequenceWorker) advanceEnrollmentStep(ctx context.Context, l lockedRow,
 			"completed": !hasNext,
 		},
 	})
+}
+
+func (w *SequenceWorker) rescheduleAgenticSkip(ctx context.Context, l lockedRow, stepCond map[string]any, phone string) {
+	cadenceMinutes := 24 * 60
+	if cadenceDays, ok := intFromCond(stepCond, "cadence_days"); ok && cadenceDays > 0 {
+		cadenceMinutes = cadenceDays * 24 * 60
+	}
+	_, err := w.pool.Exec(ctx, `
+		UPDATE bc_crm_sequence_enrollments
+		SET next_run_at = now() + ($1 || ' minutes')::interval,
+		    pause_reason = NULL,
+		    paused_at = NULL,
+		    pause_detail = NULL
+		WHERE id = $2
+	`, strconv.Itoa(cadenceMinutes), l.id)
+	if err != nil {
+		log.Printf("[seq-worker] reschedule agentic skip enrollment %d: %v", l.id, err)
+		return
+	}
+	w.markBatchRecipientAgenticSkip(ctx, l, phone)
+	audit.Log(ctx, w.pool, audit.Entry{
+		Action:     "crm.sequence.agentic_skipped",
+		EntityType: strPtr("crm_sequence_enrollment"),
+		EntityID:   &l.id,
+		Metadata: map[string]any{
+			"sequence_id":     l.seqID,
+			"lead_id":         l.leadID,
+			"current_step":    l.currentStep + 1,
+			"cadence_minutes": cadenceMinutes,
+			"reason":          "agent_decided_not_to_send",
+		},
+	})
+}
+
+func (w *SequenceWorker) markBatchRecipientAgenticSkip(ctx context.Context, l lockedRow, phone string) {
+	if l.sourceBatchID == nil {
+		return
+	}
+	_, err := w.pool.Exec(ctx, `
+		UPDATE bc_batch_ai_recipients
+		SET ai_status = CASE WHEN ai_status = 'pending' THEN 'active' ELSE ai_status END,
+		    last_event = 'Smart AI skipped this tick to avoid an unnecessary follow-up',
+		    last_event_at = now(),
+		    updated_at = now()
+		WHERE admin_user_id = $1
+		  AND batch_id = $2
+		  AND whatsapp_number = $3
+		  AND COALESCE(ai_status, 'pending') NOT IN ('excluded', 'opted_out', 'disabled')
+	`, l.adminID, *l.sourceBatchID, strings.TrimSpace(phone))
+	if err != nil {
+		log.Printf("[seq-worker] mark agentic skip batch=%d enrollment=%d: %v", *l.sourceBatchID, l.id, err)
+	}
+}
+
+func (w *SequenceWorker) markBatchRecipientFollowupSent(ctx context.Context, l lockedRow, phone, body string) {
+	preview := strings.TrimSpace(body)
+	if runes := []rune(preview); len(runes) > 180 {
+		preview = strings.TrimSpace(string(runes[:180]))
+	}
+	var err error
+	if l.sourceBatchID != nil {
+		_, err = w.pool.Exec(ctx, `
+			UPDATE bc_batch_ai_recipients
+			SET ai_status = 'active',
+			    last_event = $4,
+			    last_event_at = now(),
+			    updated_at = now()
+			WHERE admin_user_id = $1
+			  AND batch_id = $2
+			  AND whatsapp_number = $3
+			  AND COALESCE(ai_status, 'pending') NOT IN ('excluded', 'opted_out', 'disabled')
+		`, l.adminID, *l.sourceBatchID, strings.TrimSpace(phone), "AI follow-up sent: "+preview)
+	} else {
+		_, err = w.pool.Exec(ctx, `
+			UPDATE bc_batch_ai_recipients
+			SET ai_status = 'active',
+			    last_event = $3,
+			    last_event_at = now(),
+			    updated_at = now()
+			WHERE admin_user_id = $1
+			  AND whatsapp_number = $2
+			  AND COALESCE(ai_status, 'pending') NOT IN ('excluded', 'opted_out', 'disabled')
+		`, l.adminID, strings.TrimSpace(phone), "AI follow-up sent: "+preview)
+	}
+	if err != nil {
+		log.Printf("[seq-worker] mark batch recipient active enrollment=%d phone=%s: %v", l.id, phone, err)
+	}
 }
 
 // applyEnrollmentOverrides merges admin edits from
